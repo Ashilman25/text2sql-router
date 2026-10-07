@@ -106,7 +106,6 @@ def main():
                     "seconds": round(time.time() - start, 2),
                     "prompt_tokens": prompt_tokens,
                     "output_tokens": resp.get("eval_count"),
-                    # "length" means the reply hit --max_tokens and was cut off
                     "done_reason": resp.get("done_reason"),
                 })
                 

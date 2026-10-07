@@ -244,3 +244,97 @@ The official scorer prints only totals, so I wrote a quick per-question checker 
   - Stage 3 adds a 32B run on the 1,034 training questions (temperature 0, dev databases, about 70 minutes), used only for B's labels, never as a feature.
   - Stages 5 and 6 train, ablate and draw routing curves for both versions, plus a direct A vs B comparison at equal escalation.
   - `docs/Project Explained.md` has a new "Two versions of the classifier" section, and the roadmap, "What's next" and glossary are updated to match.
+
+### Found: proposal due date and team size
+
+- The proposal is due Wednesday 14 October 2026, 8 days from today. The team is two people, not four, so the Overview's four roles merge into two.
+- Nothing more has to run before writing: the proposal is a plan, and the baselines and reference points it needs are done. The stage 3 runs go in the background while we write.
+
+### Plan: 8 days to the proposal
+
+- Suggested split: I write the proposed solution, setup and dataset details, early results, experiments and metrics, and keep data, model runs, routing and cost afterwards. My teammate writes related work, introduction, problem statement and timeline, and takes features, classifiers and the demo afterwards. Abstract, references and the read-through are shared. Not agreed yet.
+- Schedule: today setup and the first runs; Wed 7 Oct the Overleaf skeleton and the 5-sample runs; Thu 8 to Sat 10 Oct first drafts and figures; Sun 11 Oct full draft and page check; Mon 12 Oct review each other's sections; Tue 13 Oct submit, keeping Wed 14 Oct spare.
+- Before the full 5-sample runs, a 50-question pilot to check that the samples sometimes disagree, since the proposal leans on that feature.
+
+### Docs changed
+
+- `docs/Project Explained.md`: "What's next" now has the due date, a suggested two-person split, a day-by-day schedule, and a fuller proposal checklist (describe both A and B with the 70 of 251 motivation, figures and tables to fill 10 pages, related work from the Overview's 9 references, an optional preliminary result). "Still unknown" now lists the final report date, whether a LaTeX template is required, and whether my teammate agrees with the split. The experiments table notes that E2 to E4 run for both A and B. The roadmap shows the proposal date.
+
+### Done: code pushed, outputs on Drive
+
+- Pushed `scripts/`, `.gitignore` and `requirements.txt`, and copied `outputs/` (all model answers so far) to the team Google Drive.
+
+### Made: the training file (`scripts/make_train.py`)
+
+- `python scripts/make_train.py data/dev/dev.json data/minidev/mini_dev_sqlite.json data/dev/train.json` copies `dev.json` without the 500 Mini-Dev questions, matched by `question_id`. Result: 1,034 questions, 0 overlap with the test set.
+- It runs no model; it only makes the question file `generate.py` reads. Without it, `generate.py` on `dev.json` would also answer the 500 test questions (about 2,500 wasted calls at 5 samples), and they could slip into training. The baselines didn't need it because the test questions already come as their own file.
+
+### Finding: the training questions are much easier than the test questions
+
+| | Simple | Moderate | Challenging |
+| --- | --- | --- | --- |
+| Training (1,034) | 777 (75%) | 214 (21%) | 43 (4%) |
+| Test (500) | 148 (30%) | 250 (50%) | 102 (20%) |
+
+- Mini-Dev was picked to have more hard questions, so the leftovers are mostly easy. The 7B will be wrong on fewer than half the training questions, and the classifier sees few hard examples.
+- It doesn't break the plan: the routing curve uses escalation shares (20%, 30%, 50%), not a fixed probability cutoff. It goes in the proposal's dataset section and the report's limitations.
+
+### Made: the per-question checker (`scripts/check.py`)
+
+- Reads a `generate.py` cache (`.jsonl`) and its question file, runs each gold query once, then runs every sample against it, with the same rule (same set of rows) and the same shared 400 s limit as the official scorer. Writes `<cache>_check.jsonl`: per sample, right or wrong, `ok`/`error`/`timeout`, row count, and a `group` number (same group = same rows, for self-agreement). Prints EX by difficulty, and how often the samples all agree.
+- Why not just the official scorer: it only prints totals, reads only sample 0 from the `.json`, and needs Mini-Dev's file formats. The classifier needs per-question labels, all 5 samples and their agreement, and it has to work on the training questions. EX numbers we report still come from the official scorer.
+- The baselines didn't need it because stage 1 only needed totals. The 7B vs 32B comparison used a quick early version of it.
+- **Check against the official scorer** on the saved test answers (all three runs took about 8 minutes):
+
+  | Model | Simple | Moderate | Challenging | Total |
+  | --- | --- | --- | --- | --- |
+  | 1.5B | 29.73 | 15.20 | 6.86 | 17.80 |
+  | 7B | 66.22 | 47.20 | 32.35 | 49.80 |
+  | 32B | 72.30 | 54.80 | 44.12 | 57.80 |
+
+  Identical to the official scorer for all three. Question by question, it also agrees with the quick early version on all 1,500 answers. Every gold query ran fine.
+- **Finding: how often the SQL crashes** (doesn't run at all) on the test questions: 1.5B 277 of 500 (55%), 7B 57 (11.4%), 32B 17 (3.4%). A crash is always wrong, so "crashed" will be an easy feature, but it covers only about a fifth of the 7B's 251 wrong answers; the rest run and return the wrong rows.
+- The test-set results are saved as `outputs/minidev_qwen{1.5b,7b,32b}_check.jsonl`, which the routing stage will use.
+
+### Docs changed
+
+- `docs/Project Explained.md`: sections for `make_train.py` and `check.py`, each with why it's needed and why the baselines didn't need it; the training vs test difficulty table; the stage 3 checklist now starts with a 50-question pilot of the 5-sample run (to check the samples sometimes disagree) before the full run; push and Drive ticked off.
+- `CLAUDE.md`: the decided models, `data/dev/train.json` in the data layout, and commands for `make_train.py`, the 5-sample training run and `check.py`.
+- `docs/Project Explained.md`: new section "The output files: what's saved and how to read it": the files each run makes, what they tell us overall (labels, features, routing score, cost), real example lines with every field explained, how `group` shows agreement between the 5 tries, commands to read them (`jq`, pandas), and what's saved now vs after stage 3. It also has the test-set right/crashed counts: 1.5B 89 right and 277 crashed, 7B 249 and 57, 32B 289 and 17. Only 57 of the 7B's 251 wrong answers crashed; the other 194 ran and returned the wrong rows.
+
+### Result: 5-sample pilot (7B, first 50 training questions)
+
+- Command: `generate.py` on `data/dev/train.json` with `--samples 5 --temperature 0.7 --out outputs/train_qwen7b_s5 --limit 50`, then `check.py` on it. 2 min 56 s (3.53 s per question, 0.71 s per try); all 250 tries ended with `stop`.
+- **The tries disagree enough:** all 5 gave the same result on only 21 of 50 questions (42%), with 2.22 different results per question on average. That's well under the 45 of 50 cutoff, so temperature 0.7 stays and the full run continues from question 50 under the same `--out`.
+- **Score:** 36.00 for the first try (simple 40.00 on 40, moderate 20.00 on 10). Low because `train.json` is in database order and all 50 are california_schools, the 7B's hardest database (23% right on its 30 test questions, against 75% for superhero). Not a bug: every gold query ran fine. The 5 tries score 36, 42, 38, 42 and 44%; at least one of the 5 is right on 28 of 50.
+- **Early hint that agreement works** (50 questions from one database, so only a hint): how many of the 5 tries match the first try's result, against how often the first try was right:
+
+  | Tries matching the first (incl. itself) | Questions | First try right |
+  | --- | --- | --- |
+  | 0 (first try crashed) | 11 | 0 |
+  | 1 | 3 | 0 |
+  | 2 | 4 | 2 |
+  | 3 | 3 | 1 |
+  | 4 | 8 | 4 |
+  | 5 | 21 | 11 |
+
+  When the first try crashed or nothing else matched it, it was never right (0 of 14). When 4 or 5 tries agreed, it was right half the time (15 of 29).
+- **Noted for features:** the 7B's test score swings a lot by database (23% to 75%). Whether to use the database as a feature is a call for the features stage; it would help here because training and test share the same 11 databases, but wouldn't carry over to new databases.
+- **New time estimates:** the full 5-sample training run is about 1 hour for the remaining 984 questions, and the 5-sample test run about 30 minutes. Stage 3 is about 3 hours of model time in total.
+- `docs/Project Explained.md`: pilot ticked with these results, and the stage 3 times updated.
+- `docs/Project Explained.md`: stage 3 now opens with a plain explanation of what the runs are for (collecting practice examples, not an experiment by themselves), a table of which run fills which box (training/test × 7B one answer, 7B 5 tries, 32B one answer; the two test-set single answers are the stage 1 baselines), why the 7B gets more runs and the 32B never gets 5 tries, and the student/expert/assistant analogy. Also ticked the checker item, which was left unticked.
+- `docs/Project Explained.md`: in the output files section, added a step-by-step reading of a real 5-try line from `outputs/train_qwen7b_s5_check.jsonl` (idx 0: all 5 tries right and in `group` 0), with the 5 SQL tries behind it. Try 1 computes the rate from two columns and tries 2 to 5 read a percentage column, yet all return the same number, which shows `group` compares results, not SQL text. Also added a made-up "unsure" line for contrast, and made clear that each line is one question and `samples` holds the 5 tries at it.
+- `docs/Project Explained.md`: new subsection "How the two terminals talk: the server and our scripts" under the downloads section: `ollama serve` as the server and `generate.py` as the client, the request and reply for one question (and which reply fields become `prompt_tokens`, `output_tokens` and `done_reason` in the `.jsonl`), what each terminal shows, why it's built this way, a `curl` check, and the `brew services` vs `ollama serve` "address already in use" clash. Also fixed the line saying the server must stay open in its own tab; on this Mac it runs as a background service.
+- `docs/Project Explained.md`: new subsection "Inside the model files: blobs and manifests", read straight from `~/.ollama/models`.
+  - How a manifest lists a model's blobs by `mediaType`, `digest` and `size`, and the steps Ollama takes to load `qwen2.5-coder:7b`.
+  - The three models share the system, template and license blobs, so there are 9 blobs for 3 models.
+  - Why files are named by fingerprint, what the config blob holds, and what `ollama rm` deletes.
+  - Only the small blobs are text; the weights file is binary GGUF: a header, 34 description entries (including the 152,064-token vocabulary) and the tables of numbers.
+  - 7B vs 32B: 28 vs 64 blocks, 339 vs 771 tables, 7,615,616,512 vs 32,763,876,352 parameters.
+  - How a prompt becomes SQL token by token, and why Q4_K_M makes the 7B 4.7 GB instead of about 15 GB (about 4.9 bits per number; 169 tables at 4 bits, 29 at 6 bits, 141 at full precision).
+  - Glossary: added Block (layer), Tensor (weight table), and Tokenizer/vocabulary.
+- **Docs changed:** "What each script does" in `Project Explained.md` now covers every command we run, with the full command and its options.
+  - New section for the official scorer, `mini_dev/evaluation/evaluation_ex.py`: where it comes from, the command, what it does, an options table with our values and its defaults, why we use 400 s instead of 30 s, and what it can't do.
+  - Tested two of the scorer's traps on a scratch folder. Without the trailing `/` on `--db_root_path`, the gold check silently gives 0.00 in every column with no error. Without `--output_log_path`, it writes a file named `SQLite` in the current folder. It also adds to its log file instead of replacing it, so re-scoring a run leaves two tables.
+  - `generate.py`: added the two commands we use (test and training), what `caffeinate -i` does, and a warning that `--questions` and `--db_root` must come from the same download.
+  - `check.py`: added both commands and an options table. `gold_check.py`: added its command.
