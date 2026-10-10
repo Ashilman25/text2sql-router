@@ -52,6 +52,7 @@ def main():
     ap.add_argument("--max_tokens", type=int, default=1024, help="cap on reply length; stops replies that loop forever")
     ap.add_argument("--limit", type=int, default=None, help="only run the first N questions (for testing)")
     ap.add_argument("--no_evidence", action="store_true", help="leave out BIRD's evidence hints")
+    ap.add_argument("--logprobs", action="store_true", help="also save each reply token's log-probability")
     args = ap.parse_args()
 
     questions = load_questions(args.questions)[: args.limit]
@@ -93,6 +94,7 @@ def main():
                         "num_predict": args.max_tokens,
                         "seed": s,
                     },
+                    logprobs=args.logprobs or None,
                 )
                 
                 prompt_tokens = resp.get("prompt_eval_count") or 0
@@ -100,14 +102,18 @@ def main():
                     print(f"\nwarning: question {idx} may be cut off, raise --num_ctx")
                     
                 reply = resp["message"]["content"]
-                samples.append({
+                sample = {
                     "raw": reply,
                     "sql": clean_sql(reply),
                     "seconds": round(time.time() - start, 2),
                     "prompt_tokens": prompt_tokens,
                     "output_tokens": resp.get("eval_count"),
                     "done_reason": resp.get("done_reason"),
-                })
+                }
+                if args.logprobs:
+                    sample["logprobs"] = [[t.token, round(t.logprob, 5)] for t in resp.get("logprobs") or []]
+
+                samples.append(sample)
                 
             row = {
                 "idx": idx,
