@@ -29,23 +29,30 @@ def run(db_path, sql, limit):
 
 
 # score every sample of one question against the gold result
+# with a reference SQL, also mark which samples return the same rows as it
 def check(job):
-    row, db_path, gold_sql, limit = job
+    row, db_path, gold_sql, limit, ref_sql = job
     gold_status, gold, gold_secs = run(db_path, gold_sql, limit)
+    if ref_sql is not None:
+        ref_status, ref, _ = run(db_path, ref_sql, max(1, limit - gold_secs))
     results, samples = [], []
     
     for s in row["samples"]:
         status, res, secs = run(db_path, s["sql"], max(1, limit - gold_secs))
         results.append(res)
-        samples.append({
+        sample = {
             "correct": int(gold is not None and res == gold),
             "status": status,
             "rows": None if res is None else len(res),
             "group": None if res is None else results.index(res),
             "seconds": round(secs, 2),
-        })
+        }
+        if ref_sql is not None:
+            sample["same_as_ref"] = int(res is not None and res == ref)
+
+        samples.append(sample)
         
-    return {
+    out = {
         "idx": row["idx"],
         "question_id": row["question_id"],
         "db_id": row["db_id"],
@@ -55,6 +62,10 @@ def check(job):
         "gold_seconds": round(gold_secs, 2),
         "samples": samples,
     }
+    if ref_sql is not None:
+        out["ref_status"] = ref_status
+
+    return out
 
 
 # print EX by difficulty, plus how often the samples agree when there are several
@@ -85,6 +96,7 @@ def main():
     ap.add_argument("--db_root", required=True, help="folder holding <db_id>/<db_id>.sqlite")
     ap.add_argument("--cache", required=True, help="a .jsonl file written by generate.py")
     ap.add_argument("--out", help="defaults to the cache path ending in _check.jsonl")
+    ap.add_argument("--ref", help="another cache for the same questions; marks samples returning the same rows as its sample 0")
     ap.add_argument("--timeout", type=float, default=400, help="seconds for gold plus prediction, like --meta_time_out")
     ap.add_argument("--num_cpus", type=int, default=8)
     args = ap.parse_args()
@@ -94,12 +106,23 @@ def main():
     with open(args.cache) as f:
         rows = [json.loads(line) for line in f if line.strip()]
 
+    refs = {}
+    if args.ref:
+        with open(args.ref) as f:
+            refs = {r["idx"]: r for r in (json.loads(line) for line in f if line.strip())}
+
     jobs = []
     for row in sorted(rows, key=lambda r: r["idx"]):
         q = questions[row["idx"]]
         assert q["question_id"] == row["question_id"], f"question {row['idx']} doesn't match the cache"
         db_path = f"{args.db_root.rstrip('/')}/{q['db_id']}/{q['db_id']}.sqlite"
-        jobs.append((row, db_path, q["SQL"], args.timeout))
+        ref_sql = None
+        if args.ref:
+            ref = refs[row["idx"]]
+            assert ref["question_id"] == row["question_id"], f"question {row['idx']} doesn't match the reference"
+            ref_sql = ref["samples"][0]["sql"]
+
+        jobs.append((row, db_path, q["SQL"], args.timeout, ref_sql))
 
     with Pool(args.num_cpus) as pool:
         results = list(tqdm(pool.imap_unordered(check, jobs), total=len(jobs)))
