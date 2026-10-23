@@ -1,22 +1,20 @@
 # Project journal
 
-A running log of what was done, what came out of it, and what changed. Newest entry at the bottom. Each entry: what was done, results with numbers, findings, and what changed because of them.
+A running log of the project's runs, results, findings and method decisions, with exact numbers. Newest entry at the bottom. Each entry: what was run, what came out of it, findings, and what changed in the method because of them.
 
 ---
 
 ## 2026-10-05: Repo, environment and data setup
 
-### Starting point
+### Hardware
 
-- The repo has `scripts/generate.py`, `scripts/gold_check.py`, `requirements.txt` and `.gitignore`, copied from the setup guide. Only the README is pushed to GitHub (`Ashilman25/text2sql-router`).
-- The project overview and setup guide in `docs/` are the plan, not final. The proposal (10 to 12 pages, LaTeX) is the next deliverable.
 - My laptop is an Apple M5 Max with 64 GB (Ollama sees 51.8 GB of GPU memory), so it can run the 32B model. Large-model runs happen here.
 
 ### Environment
 
 - `mini_dev/` is cloned at commit `abd11b6` (2026-09-05).
 - `.venv` uses Python 3.11.15, and all of `requirements.txt` installs and imports.
-- Ollama 0.35.1 is installed with Homebrew. `brew services start ollama` registered, but the server never stayed up when started from a Claude Code session, so I ran `ollama serve` directly. Still to check: whether the brew service works from a normal terminal.
+- Ollama 0.35.1, installed with Homebrew, serves the models locally.
 - Models pulled:
 
 | Model | Ollama ID | Size |
@@ -45,7 +43,7 @@ Both zips download directly with curl (the Drive link works with `&confirm=t`), 
 
 ### Finding: Mini-Dev and full dev do not share the same databases
 
-The setup guide assumed both downloads ship identical SQLite files. Six of the 11 are byte-identical; five have the same schema but different rows:
+Both downloads include the same 11 databases by name, but not the same files. Six of the 11 are byte-identical; five have the same schema but different rows:
 
 | Database | Difference (Mini-Dev vs dev) |
 | --- | --- |
@@ -95,14 +93,7 @@ data/_downloads/              original zips (can be deleted)
 - 3 of 5 correct (quick set comparison against gold, not the official scorer).
 - About 2.6 s per question; prompts about 400 tokens; 100% GPU; context window 16,384.
 - Replies are bare SQL with no code fences, and `clean_sql` extracts it correctly.
-- Ollama 0.35.1 picks its default context window from GPU memory (262,144 on this machine), not the 4,096 the setup guide mentions. `generate.py` sets 16,384 explicitly, so runs stay consistent across laptops.
-
-### Docs changed
-
-- `CLAUDE.md`: data layout and sources, `rebuild_gold.py`, separate database folders, `--db_root data/dev/dev_databases` for the dev run, the 400 s timeout, splitting on `question_id`.
-- The setup guide in `docs/` is not updated yet. It still says the databases are shared, uses 30 s, and matches on question text.
-
-- Added `docs/Project Explained.md`: a plain-language walkthrough of the whole project (what we train, how routing works, roadmap and status).
+- Ollama 0.35.1 picks its default context window from GPU memory (262,144 on this machine), not a fixed 4,096. `generate.py` sets 16,384 explicitly, so runs stay consistent across laptops.
 
 ### Noted for later (not done)
 
@@ -113,10 +104,8 @@ data/_downloads/              original zips (can be deleted)
 
 ### Next
 
-- Full Mini-Dev zero-shot runs with 1.5B, 7B and 32B, scored at 400 s, split by difficulty. These are the proposal's first numbers.
+- Full Mini-Dev zero-shot runs with 1.5B, 7B and 32B, scored at 400 s, split by difficulty.
 - Pick the small model (closest to 50% EX) and decide on the large model.
-- Still open: proposal and final due dates, team size and roles.
-- Commit and push `scripts/rebuild_gold.py`, `.gitignore` and `requirements.txt`. `CLAUDE.md` stays local (it's in `.gitignore`).
 
 ### Baseline runs started (1.5B first)
 
@@ -126,7 +115,6 @@ data/_downloads/              original zips (can be deleted)
 - After 115 of 500 questions: about 2.6 s per question, and 3 replies hit the cap.
 - The 1.5B writes 290 to 410 tokens per reply (explanations around the SQL) compared with about 50 for 7B, even though the prompt asks for SQL only. `clean_sql` still extracts the SQL.
 - Idea: replies that hit the cap are almost always wrong, so a "hit the cap" flag could be a useful classifier feature.
-- Added a "Running the baselines" section to `docs/Project Explained.md`: the commands, how to read the progress bar, the Ollama log and the scorer output, and how the numbers feed the project.
 
 ### Result: 1.5B on Mini-Dev (E1)
 
@@ -160,7 +148,7 @@ data/_downloads/              original zips (can be deleted)
 ### Decision: the 7B is the small model
 
 - The rule set beforehand was to pick whichever small model is closest to 50% EX. The 7B gets 49.80 (249 right, 251 wrong), so the classifier gets an almost even split of right and wrong examples. The 1.5B's 17.80 would mean 82% wrong.
-- **Change:** the training data generation (5 samples per dev question) uses only the 7B, which matches the `dev_qwen7b_s5` command in `CLAUDE.md`. The 1.5B stays as a row in the E1 table, and I won't run it again.
+- **Change:** the training data generation (5 samples per dev question) uses only the 7B. The 1.5B stays as a row in the E1 table, and I won't run it again.
 - The "always small" end of the routing curve is 49.80.
 - Accuracy still falls with difficulty (66 to 47 to 32), so the difficulty-label router stays a real baseline. But the 7B gets a third of the challenging questions right and misses a third of the simple ones, so difficulty alone won't separate right answers from wrong ones well. That leaves room for our classifier to win.
 - New time estimate for the training data: 1,534 questions times 5 samples is about 7,700 calls. At about 1 s per call that's roughly 2 to 3 hours, not overnight. Replies at temperature 0.7 may be a little longer.
@@ -170,12 +158,9 @@ data/_downloads/              original zips (can be deleted)
 - Generate and score the 32B. That gives the top of the routing curve and the gap a router can recover.
 - Then decide on the large model. If the 32B scores only a little above 49.80, consider an API model instead.
 
-### Docs changed
+### Finding: all three models are 4-bit versions
 
-- `docs/Project Explained.md`: added a table of contents at the top and a glossary at the end. The glossary explains every term used in the docs and code (about 100 terms), grouped as task and data, models, scoring, classifier, routing, project plan, and tools and files.
-- `docs/Project Explained.md`: added three sections. "The models we have" covers the three Qwen2.5-Coder models: parameters (1.5B, 7.6B, 32.8B), 4-bit `Q4_K_M` compression, Apache 2.0 license, IDs, roles and scores. "How we got everything" covers how Ollama pulls and runs models, Hugging Face, the BIRD downloads and the full setup commands. "What each script does" covers the three scripts and the two borrowed Mini-Dev files. Also added the related terms to the glossary.
-- Checked with `ollama show`: all three models are `Q4_K_M` quantized with a 32,768-token maximum context. Our scores are for these compressed versions, and the report should say so.
-- `docs/Project Explained.md`: added "Why the 7B is the small model, not the 1.5B", a plain-language explanation of the choice: "small model" is a role, not a size. On the 1.5B, 82 of every 100 questions would be escalated anyway, and a classifier could reach 82% by always saying "wrong". On the 7B, a 50/50 split leaves half the answers worth keeping and forces the classifier to learn real warning signs.
+- Checked with `ollama show`: all three models are `Q4_K_M` quantized with a 32,768-token maximum context. Our scores are for these compressed versions.
 
 ### Result: 32B on Mini-Dev (E1), baselines complete
 
@@ -211,29 +196,26 @@ The official scorer prints only totals, so I wrote a quick per-question checker 
 - The gap is 8.0 points, and an oracle shows 14 points of headroom (49.8 to 63.8), enough for a meaningful routing curve.
 - It's free and local, and its timings (4.15 s against 0.99 s per question) give the cost experiment a clear cost ratio.
 - For comparison, the Mini-Dev README's plain-prompt API baselines are lower (gpt-4 47.80, gpt-4-turbo 45.80, scored at 30 s against the older gold file). A newer API model might score higher, but that's untested and would cost money. It could be a stretch comparison.
-- Catch: the 32B fixes only about 28% of the 7B's wrong answers, so "the 7B is probably wrong" doesn't mean "the 32B will fix it". That's fine for the plan: escalating a question both get wrong costs a call but never lowers accuracy. It's still worth a sentence in the proposal.
+- Catch: the 32B fixes only about 28% of the 7B's wrong answers, so "the 7B is probably wrong" doesn't mean "the 32B will fix it". That's fine for the plan: escalating a question both get wrong costs a call but never lowers accuracy.
 
 ### Next
 
 - Decide on the large model (leaning 32B).
-- Write the proposal with these E1 numbers and the oracle, difficulty and random reference points.
 - Add the per-question checker to `scripts/`. The classifier's training labels need it, and it can cache gold results instead of re-running question 701 every time.
 - Training data: the 7B, 5 samples per question, on the dev questions against the dev databases, and on the Mini-Dev questions against the Mini-Dev databases (about 2 to 3 hours in total).
 
-### Docs changed
+### Plan changes
 
-- `docs/Project Explained.md`: added the 32B's score and speed, marked stage 1 done, and added a table of real reference points (always small, random, difficulty, always large, oracle). Also added the 7B vs 32B question-by-question table with a plain explanation, and updated "What's next". The oracle is now defined as "escalate what the small model gets wrong and the large model gets right".
-- `docs/Project Explained.md`: rewrote "What's next" as a full checklist from now to the final report: decisions, proposal, training data, features, classifiers, routing, cost, extra scoring, report and stretch goals. Also updated the roadmap (stage 1 done; stages 2 and 3 next), added the looping fix to "What we've done", and added ROC-AUC, PR-AUC and F1 to the glossary.
-- Plan changes written into it:
-  - Run stage 3 on a training file of the 1,034 non-Mini-Dev questions instead of all 1,534.
-  - Add a temperature-0 7B run for the training questions, so labels and SQL features come from the answer the router would keep.
-  - Run 5 samples on Mini-Dev against its own databases. The new estimate is about 8,700 calls, roughly 2.5 to 3 hours.
-  - Added an optional decision: also predict "worth escalating" (7B wrong and 32B right), which would need a 32B run on the training questions (about 70 minutes).
+- Run stage 3 on a training file of the 1,034 non-Mini-Dev questions instead of all 1,534.
+- Add a temperature-0 7B run for the training questions, so labels and SQL features come from the answer the router would keep.
+- Run 5 samples on Mini-Dev against its own databases. The new estimate is about 8,700 calls, roughly 2.5 to 3 hours.
+- Optionally also predict "worth escalating" (7B wrong and 32B right), which needs a 32B run on the training questions (about 70 minutes).
+- Before the full 5-sample runs, a 50-question pilot to check that the samples sometimes disagree, since the agreement feature depends on it.
 
 ### Decision: the 32B is the large model
 
 - The only other option was a paid API model, and nothing points to paying for one. The 32B is free and local, scores 57.80 (8.0 points above the 7B), and leaves 14 points between "always small" and the oracle (49.8 to 63.8). Its answers for all 500 test questions are already saved, so routing needs no more large-model runs. The Mini-Dev README's published API baselines with this kind of prompt are lower anyway (gpt-4 47.80).
-- **Change:** `docs/Project Explained.md` now lists the 32B as the large model everywhere, and an API model only as a stretch comparison.
+- An API model stays only a possible stretch comparison.
 
 ### Decision: train two classifier versions (A and B)
 
@@ -243,26 +225,6 @@ The official scorer prints only totals, so I wrote a quick per-question checker 
 - **Changes:**
   - Stage 3 adds a 32B run on the 1,034 training questions (temperature 0, dev databases, about 70 minutes), used only for B's labels, never as a feature.
   - Stages 5 and 6 train, ablate and draw routing curves for both versions, plus a direct A vs B comparison at equal escalation.
-  - `docs/Project Explained.md` has a new "Two versions of the classifier" section, and the roadmap, "What's next" and glossary are updated to match.
-
-### Found: proposal due date and team size
-
-- The proposal is due Wednesday 14 October 2026, 8 days from today. The team is two people, not four, so the Overview's four roles merge into two.
-- Nothing more has to run before writing: the proposal is a plan, and the baselines and reference points it needs are done. The stage 3 runs go in the background while we write.
-
-### Plan: 8 days to the proposal
-
-- Suggested split: I write the proposed solution, setup and dataset details, early results, experiments and metrics, and keep data, model runs, routing and cost afterwards. My teammate writes related work, introduction, problem statement and timeline, and takes features, classifiers and the demo afterwards. Abstract, references and the read-through are shared. Not agreed yet.
-- Schedule: today setup and the first runs; Wed 7 Oct the Overleaf skeleton and the 5-sample runs; Thu 8 to Sat 10 Oct first drafts and figures; Sun 11 Oct full draft and page check; Mon 12 Oct review each other's sections; Tue 13 Oct submit, keeping Wed 14 Oct spare.
-- Before the full 5-sample runs, a 50-question pilot to check that the samples sometimes disagree, since the proposal leans on that feature.
-
-### Docs changed
-
-- `docs/Project Explained.md`: "What's next" now has the due date, a suggested two-person split, a day-by-day schedule, and a fuller proposal checklist (describe both A and B with the 70 of 251 motivation, figures and tables to fill 10 pages, related work from the Overview's 9 references, an optional preliminary result). "Still unknown" now lists the final report date, whether a LaTeX template is required, and whether my teammate agrees with the split. The experiments table notes that E2 to E4 run for both A and B. The roadmap shows the proposal date.
-
-### Done: code pushed, outputs on Drive
-
-- Pushed `scripts/`, `.gitignore` and `requirements.txt`, and copied `outputs/` (all model answers so far) to the team Google Drive.
 
 ### Made: the training file (`scripts/make_train.py`)
 
@@ -277,7 +239,7 @@ The official scorer prints only totals, so I wrote a quick per-question checker 
 | Test (500) | 148 (30%) | 250 (50%) | 102 (20%) |
 
 - Mini-Dev was picked to have more hard questions, so the leftovers are mostly easy. The 7B will be wrong on fewer than half the training questions, and the classifier sees few hard examples.
-- It doesn't break the plan: the routing curve uses escalation shares (20%, 30%, 50%), not a fixed probability cutoff. It goes in the proposal's dataset section and the report's limitations.
+- It doesn't break the plan: the routing curve uses escalation shares (20%, 30%, 50%), not a fixed probability cutoff.
 
 ### Made: the per-question checker (`scripts/check.py`)
 
@@ -295,12 +257,6 @@ The official scorer prints only totals, so I wrote a quick per-question checker 
   Identical to the official scorer for all three. Question by question, it also agrees with the quick early version on all 1,500 answers. Every gold query ran fine.
 - **Finding: how often the SQL crashes** (doesn't run at all) on the test questions: 1.5B 277 of 500 (55%), 7B 57 (11.4%), 32B 17 (3.4%). A crash is always wrong, so "crashed" will be an easy feature, but it covers only about a fifth of the 7B's 251 wrong answers; the rest run and return the wrong rows.
 - The test-set results are saved as `outputs/minidev_qwen{1.5b,7b,32b}_check.jsonl`, which the routing stage will use.
-
-### Docs changed
-
-- `docs/Project Explained.md`: sections for `make_train.py` and `check.py`, each with why it's needed and why the baselines didn't need it; the training vs test difficulty table; the stage 3 checklist now starts with a 50-question pilot of the 5-sample run (to check the samples sometimes disagree) before the full run; push and Drive ticked off.
-- `CLAUDE.md`: the decided models, `data/dev/train.json` in the data layout, and commands for `make_train.py`, the 5-sample training run and `check.py`.
-- `docs/Project Explained.md`: new section "The output files: what's saved and how to read it": the files each run makes, what they tell us overall (labels, features, routing score, cost), real example lines with every field explained, how `group` shows agreement between the 5 tries, commands to read them (`jq`, pandas), and what's saved now vs after stage 3. It also has the test-set right/crashed counts: 1.5B 89 right and 277 crashed, 7B 249 and 57, 32B 289 and 17. Only 57 of the 7B's 251 wrong answers crashed; the other 194 ran and returned the wrong rows.
 
 ### Result: 5-sample pilot (7B, first 50 training questions)
 
@@ -321,20 +277,199 @@ The official scorer prints only totals, so I wrote a quick per-question checker 
   When the first try crashed or nothing else matched it, it was never right (0 of 14). When 4 or 5 tries agreed, it was right half the time (15 of 29).
 - **Noted for features:** the 7B's test score swings a lot by database (23% to 75%). Whether to use the database as a feature is a call for the features stage; it would help here because training and test share the same 11 databases, but wouldn't carry over to new databases.
 - **New time estimates:** the full 5-sample training run is about 1 hour for the remaining 984 questions, and the 5-sample test run about 30 minutes. Stage 3 is about 3 hours of model time in total.
-- `docs/Project Explained.md`: pilot ticked with these results, and the stage 3 times updated.
-- `docs/Project Explained.md`: stage 3 now opens with a plain explanation of what the runs are for (collecting practice examples, not an experiment by themselves), a table of which run fills which box (training/test × 7B one answer, 7B 5 tries, 32B one answer; the two test-set single answers are the stage 1 baselines), why the 7B gets more runs and the 32B never gets 5 tries, and the student/expert/assistant analogy. Also ticked the checker item, which was left unticked.
-- `docs/Project Explained.md`: in the output files section, added a step-by-step reading of a real 5-try line from `outputs/train_qwen7b_s5_check.jsonl` (idx 0: all 5 tries right and in `group` 0), with the 5 SQL tries behind it. Try 1 computes the rate from two columns and tries 2 to 5 read a percentage column, yet all return the same number, which shows `group` compares results, not SQL text. Also added a made-up "unsure" line for contrast, and made clear that each line is one question and `samples` holds the 5 tries at it.
-- `docs/Project Explained.md`: new subsection "How the two terminals talk: the server and our scripts" under the downloads section: `ollama serve` as the server and `generate.py` as the client, the request and reply for one question (and which reply fields become `prompt_tokens`, `output_tokens` and `done_reason` in the `.jsonl`), what each terminal shows, why it's built this way, a `curl` check, and the `brew services` vs `ollama serve` "address already in use" clash. Also fixed the line saying the server must stay open in its own tab; on this Mac it runs as a background service.
-- `docs/Project Explained.md`: new subsection "Inside the model files: blobs and manifests", read straight from `~/.ollama/models`.
-  - How a manifest lists a model's blobs by `mediaType`, `digest` and `size`, and the steps Ollama takes to load `qwen2.5-coder:7b`.
-  - The three models share the system, template and license blobs, so there are 9 blobs for 3 models.
-  - Why files are named by fingerprint, what the config blob holds, and what `ollama rm` deletes.
-  - Only the small blobs are text; the weights file is binary GGUF: a header, 34 description entries (including the 152,064-token vocabulary) and the tables of numbers.
-  - 7B vs 32B: 28 vs 64 blocks, 339 vs 771 tables, 7,615,616,512 vs 32,763,876,352 parameters.
-  - How a prompt becomes SQL token by token, and why Q4_K_M makes the 7B 4.7 GB instead of about 15 GB (about 4.9 bits per number; 169 tables at 4 bits, 29 at 6 bits, 141 at full precision).
-  - Glossary: added Block (layer), Tensor (weight table), and Tokenizer/vocabulary.
-- **Docs changed:** "What each script does" in `Project Explained.md` now covers every command we run, with the full command and its options.
-  - New section for the official scorer, `mini_dev/evaluation/evaluation_ex.py`: where it comes from, the command, what it does, an options table with our values and its defaults, why we use 400 s instead of 30 s, and what it can't do.
-  - Tested two of the scorer's traps on a scratch folder. Without the trailing `/` on `--db_root_path`, the gold check silently gives 0.00 in every column with no error. Without `--output_log_path`, it writes a file named `SQLite` in the current folder. It also adds to its log file instead of replacing it, so re-scoring a run leaves two tables.
-  - `generate.py`: added the two commands we use (test and training), what `caffeinate -i` does, and a warning that `--questions` and `--db_root` must come from the same download.
-  - `check.py`: added both commands and an options table. `gold_check.py`: added its command.
+
+### Finding: the official scorer fails silently
+
+Tested on a scratch folder:
+
+- Without the trailing `/` on `--db_root_path`, the gold check gives 0.00 in every column, with no error.
+- Without `--output_log_path`, it writes a file named `SQLite` in the current folder.
+- It adds to its log file instead of replacing it, so re-scoring a run leaves two tables.
+
+---
+
+## 2026-10-09: Stage 3 runs done and checked
+
+### Runs
+
+All four stage 3 runs finished (6 and 7 Oct) and went through `check.py` (8 Oct):
+
+| Run | Questions | Databases | Tries | Model time | Per question | Estimate was |
+| --- | --- | --- | --- | --- | --- | --- |
+| `train_qwen7b` | 1,034 training | dev | 1 at temp 0 | 12.2 min | 0.71 s | 17 min |
+| `train_qwen32b` | 1,034 training | dev | 1 at temp 0 | 52.5 min | 3.05 s | 70 min |
+| `train_qwen7b_s5` | 1,034 training | dev | 5 at temp 0.7 | 60.5 min (incl. the 50-question pilot) | 3.51 s | 1 hour |
+| `minidev_qwen7b_s5` | 500 test | Mini-Dev | 5 at temp 0.7 | 37.9 min | 4.55 s | 30 min |
+
+About 2 h 43 min of model time in total. The 32B is 4.3 times slower per call than the 7B on the training questions (3.05 s against 0.71 s), close to the 4.2 times on the test set.
+
+### File checks
+
+- Every cache has every question exactly once (1,034 or 500), and `question_id` and `db_id` match the question file at every position. Right model in every row.
+- All 9,738 tries ended with `stop`; none hit the 1,024-token cap. No empty SQL. The `.json` predictions match sample 0 on every question.
+- Every gold query ran (`ok`) and no answer timed out. Slowest gold: training question_id 646 at 3.3 to 6.9 s; Mini-Dev question_id 701 at 148 s with 8 checks running in parallel (about 100 s alone), still well under 400 s.
+- The temperature-0 training run really is a separate run: its SQL matches the first of the 5 tries word for word on only 316 of 1,034 questions (it appears somewhere among the 5 on 830).
+- The totals `check.py` printed match what I recomputed from the `_check.jsonl` files.
+
+### Result: 7B and 32B on the training questions (temperature 0)
+
+| Model | Simple (777) | Moderate (214) | Challenging (43) | Total |
+| --- | --- | --- | --- | --- |
+| qwen2.5-coder:7b | 59.07 | 39.72 | 39.53 | **54.26** (561 right) |
+| qwen2.5-coder:32b | 68.98 | 49.53 | 55.81 | **64.41** (666 right) |
+
+| | 32B right | 32B wrong |
+| --- | --- | --- |
+| **7B right** | 505 | 56 |
+| **7B wrong** | 161 | 312 |
+
+- **Label A** ("is the 7B wrong?"): 473 of 1,034 yes (45.7%), against 50.2% on the test set. Close to balanced.
+- **Label B** ("7B wrong and 32B right"): 161 yes (15.6%), against 70 (14.0%) on the test set. So B has 161 positive training examples.
+- The 32B fixes 161 of the 7B's 473 wrong answers (34.0%), against 27.9% on the test set. The gap between the models is 10.15 points (8.0 on test), and the oracle is 69.83.
+- Crashes: 7B 115 of 1,034 (11.1%; test 11.4%), 32B 25 (2.4%; test 3.4%). Of the 7B's 473 wrong answers, 115 crashed and 358 ran and returned the wrong rows (78 of those returned no rows at all).
+- **Finding: the training questions are only easier because of the mix.** Within each difficulty, the 7B scores lower on training than on test for simple (59.1 vs 66.2) and moderate (39.7 vs 47.2); challenging is higher (39.5 vs 32.4, but only 43 questions). I don't know why yet. One guess: Mini-Dev's questions and gold SQL were cleaned up (16 of its gold queries differ from `dev.json`) and the rest of dev wasn't. Untested.
+- 7B by database on training: superhero 91% (77 questions) down to thrombosis_prediction 33% (113). california_schools, the hardest on test (23%), is 41% on training (59).
+
+### Result: 5 tries at temperature 0.7
+
+| | Training (1,034) | Test (500) |
+| --- | --- | --- |
+| First try: simple / moderate / challenging | 58.82 / 34.58 / 44.19 | 64.19 / 45.60 / 24.51 |
+| First try, total | 53.19 | 46.80 |
+| Average of the 5 tries | 53.37 | 47.52 |
+| Temperature-0 answer (for comparison) | 54.26 | 49.80 |
+| At least one of the 5 right | 65.67 (679) | 62.20 (311) |
+| Majority vote of the 5 | 58.22 | 51.60 |
+| All 5 gave the same result | 542 (52.4%) | 220 (44.0%) |
+| Different results per question | 1.99 | 2.21 |
+
+- Temperature 0.7 costs accuracy: the first try is 1.1 points below the temperature-0 answer on training and 3.0 on test. This backs the earlier plan: route the temperature-0 answer, use the 5 tries only for agreement.
+- Majority vote (most common result among tries that ran, ties go to the earlier try) beats the temperature-0 answer by 4.0 points on training and 1.8 on test, at 5 calls per question. Not in the plan yet; it could be one more "small model only" reference point.
+
+### Finding: agreement between the tries predicts correctness
+
+How many of the 5 tries return the same rows as the first try, against how often the first try was right:
+
+| Tries matching the first (incl. itself) | Training questions | First try right | Test questions | First try right |
+| --- | --- | --- | --- | --- |
+| 0 (first try crashed) | 138 | 0 (0%) | 76 | 0 (0%) |
+| 1 | 54 | 8 (14.8%) | 42 | 9 (21.4%) |
+| 2 | 83 | 21 (25.3%) | 47 | 6 (12.8%) |
+| 3 | 92 | 48 (52.2%) | 49 | 18 (36.7%) |
+| 4 | 125 | 58 (46.4%) | 66 | 36 (54.5%) |
+| 5 | 542 | 415 (76.6%) | 220 | 165 (75.0%) |
+
+- Used alone as a score, this count gives ROC-AUC 0.796 on training. The pilot's hint holds on the full run. (I also looked at the test number, 0.819, as a check only; feature choices must come from the training questions.)
+- Catch: this is agreement with the *first try*, but the router keeps the *temperature-0 answer*. `check.py` only groups results within one run, so "how many of the 5 tries return the same rows as the temperature-0 answer" has to be computed in the features stage by running both and comparing.
+- Signals for the temperature-0 answer that need no extra runs (training AUC, then test): how many of the 5 tries crashed, 0.668 / 0.656 (when all 5 crashed, the temperature-0 answer was right on 0 of 55 training questions); whether the temperature-0 SQL itself crashed, 0.622 / 0.614; how many tries wrote word-for-word the same SQL, 0.656 / 0.654.
+- Consistency check between the runs (uses the gold answers, so not a feature): when all 5 tries were right, the temperature-0 answer was right on 413 of 415 training questions; when none were, on 1 of 355.
+
+### Next
+
+- Stage 3 is done; no more model runs are needed.
+- Features stage: build the feature table, one row per question with labels A and B. First feature to add: how many of the 5 tries return the same rows as the temperature-0 answer.
+
+### Result: dataset and reference-curve numbers
+
+All from saved runs and the question files:
+
+- **Databases:** 75 tables and 798 columns over the 11; from toxicology (4 tables, 11 columns) to formula_1 (13 tables) and european_football_2 (199 columns).
+- **Training vs test questions:** question length 13.9 vs 15.8 words; hint length 12.2 vs 19.4 words; gold SQL with a JOIN 71% vs 81%, with a nested SELECT 6% vs 13%.
+- **Reference curves on the test set** (escalation share 0 to 100%): random, perfect A (escalates only the 7B's wrong answers) and oracle. At 20 / 30 / 50%, perfect A gets 55.38 / 58.17 / 63.74; the oracle stays at 63.80 from 14% to 94%.
+- **Areas under those curves (test):** random 53.80, difficulty order 54.30, perfect A 58.79, oracle 62.64.
+- **Difficulty router escalating challenging + moderate:** 56.00 at 70.4% (random 55.43).
+- **Licenses:** the Mini-Dev repo states CC BY-SA 4.0 only by a README badge (no LICENSE file); Hugging Face lists the dataset as CC BY-SA 4.0. Ollama is MIT.
+
+### Finding: missing hints explain part of the training/test gap
+
+- 146 training questions (14.1%) have no evidence hint, against 2 test questions (0.4%). On training, the 7B gets 56.1% with a hint and 43.2% without (32B: 65.5% and 57.5%). Simple questions with a hint: 62.3% (637 questions); without: 44.3% (140). Moderate questions with a hint are still at 40.2%, against 47.2% on test, so the hints don't explain all of it.
+
+---
+
+## 2026-10-10: Agreement, simple rules, confidence and significance
+
+### Why
+
+Five gaps in the method so far:
+
+1. The 0.796 AUC is agreement with the first *sample*, not with the temperature-0 answer the router keeps.
+2. No simple-rule baseline: nothing showed the classifier has to beat more than random.
+3. No significance tests, on a 500-question test set.
+4. The cost model makes the 5-sample router slower than always-large on one machine.
+5. The 7B's token probabilities (free from the call already made) weren't used.
+
+Numbers that use the 7B's outputs are training-set numbers; the test set is still untouched apart from the reference routers already reported.
+
+### Made: two script options
+
+- `generate.py --logprobs`: saves each reply token's log-probability (`logprobs`, a list of `[token, logprob]` pairs per sample).
+- `check.py --ref <cache>`: also runs the reference run's sample 0 and marks each sample `same_as_ref`. Ran it on `train_qwen7b_s5` with `--ref outputs/train_qwen7b.jsonl` → `outputs/train_qwen7b_s5_vs_t0_check.jsonl` (1 min). Right/wrong labels are identical to `train_qwen7b_s5_check.jsonl`, and the reference statuses match `train_qwen7b_check.jsonl` on all 1,034.
+
+### Result: agreement with the temperature-0 answer (training)
+
+- ROC-AUC **0.784** for A, 0.778 for B (PR-AUC 0.765 and 0.349; base rates 0.457 and 0.156). Replaces the 0.796.
+- All 5 agree: 7B right on 413 of 539 (76.6%). None agrees: 1 of 138 (115 of those are temperature-0 crashes).
+- By number of samples (A): 0.701 with 1, 0.742 with 2, 0.765 with 3, 0.775 with 4, 0.784 with 5. Most of it comes from the first 2-3.
+
+### Result: simple routers on training
+
+- "Escalate if at most 2 of 5 samples agree": **62.96 at 25.1%**, against 56.81 for random at that share. "At most 4": 64.70 at 47.9%, above always-large (64.41).
+- "Escalate if the 7B's SQL crashed": 59.67 at 11.1% (random 55.38).
+- Difficulty label: 54.93 at 4.2% (random 54.68); with moderate, 56.96 at 24.9% (random 56.78).
+- So the bar for the classifier is the agreement rule, not random.
+
+### Result: token log-probabilities (training)
+
+- New run `outputs/train_qwen7b_lp` (7B, temperature 0, `--logprobs`): 0.79 s per question (0.71 without). All 1,034 replies identical to `train_qwen7b`.
+- Mean token log-probability: ROC-AUC 0.731 for A, 0.663 for B. Sum: 0.755 / 0.663 (partly length). Lowest token: 0.657 / 0.611.
+- Not redundant with agreement (Spearman 0.47): among the 539 questions where all 5 samples agree, it still gives 0.658.
+
+### Result: majority vote (training)
+
+- 58.22 vs. 54.26 for the temperature-0 answer (fixes 62, breaks 21). Oracle with the majority answer kept: 70.60 (vs. 69.83).
+
+### Result: significance (test, reference routers only)
+
+- 7B vs. 32B: McNemar exact p = 7.9e-5 (70 fixed, 30 broken); 32B minus 7B +8.0, 95% CI +4.2 to +11.8.
+- One system's EX on 500 questions: about ±4.4 points (7B: 45.4 to 54.2).
+- **Finding: the difficulty label is not clearly better than random.** +0.77 at 20.4% (CI −0.94 to +2.51) and +0.57 at 70.4% (CI −1.06 to +2.18). Hard questions are where the 7B fails, but the 32B fails there too.
+
+### Result: Soft F1 (test, official scorer, 400 s)
+
+- 1.5B 19.62 (simple 31.17 / moderate 16.52 / challenging 10.47); 7B 52.68 (68.01 / 50.64 / 35.45); 32B 61.62 (74.97 / 59.32 / 47.89). Same ranking as EX, 2 to 4 points higher.
+- Gold check: Soft F1 100.00 on an idle machine. **Found:** my first gold run gave 99.80 because question 701 timed out at 400 s while Ollama was generating and another 8-process job was running. The gold check runs 701's gold SQL twice (about 150 s each under load). Scorers should run on an otherwise idle machine.
+
+### Result: SQL execution time
+
+- Running the SQL takes 0.037 s per question for the temperature-0 answer and 0.19 s for all 5 samples (mean; medians 0). Negligible.
+- With 5 samples drawn one after another, the router takes at least ~5.8 s per question on the test set, more than always-large (4.15 s). Without samples it is faster than always-large while escalating under 76%.
+
+### Run: token log-probabilities on the test set
+
+- `outputs/minidev_qwen7b_lp` (7B, temperature 0, `--logprobs`, 500 test questions): 7 min 11 s, 0.86 s per question. All 500 replies identical to `minidev_qwen7b`, so its right/wrong marks still apply. No reply hit the cap; every reply has log-probabilities. Nothing scored or analyzed: test-set features stay untouched until E4.
+
+---
+
+## 2026-10-22: Methodology for the remaining experiments
+
+### Plan changes
+
+- Before the single test run, rehearse all of E4 on the training set using out-of-fold cross-validation scores, then write the frozen choices (classifiers, features, tie-break, which agreement rule the classifier must beat, majority variant, bootstrap seed) here before scoring Mini-Dev.
+- Tune E2's settings with nested cross-validation, so the reported CV scores aren't from the folds the settings were picked on.
+- The agreement features get one set of columns per k = 1 to 5, since E3 and E5 compare numbers of tries.
+- Test-set exposure so far: a few test-set numbers for the 7B's samples (agreement ROC-AUC 0.819 with the first sample, the crash and same-text AUCs, majority vote 51.6%) were computed once on 9 Oct as a check. Nothing was chosen from them.
+
+### Run: test samples against the temperature-0 answer
+
+- `check.py --ref` on `minidev_qwen7b_s5` with `--ref outputs/minidev_qwen7b.jsonl` → `outputs/minidev_qwen7b_s5_vs_t0_check.jsonl`. 2 min 40 s for 500 questions.
+- Checks: 500 questions; the samples' right/wrong marks are identical to `minidev_qwen7b_s5_check.jsonl`, and the reference statuses match `minidev_qwen7b_check.jsonl` on all 500. The printed summary repeats the 9 Oct numbers (first sample 46.80; all 5 samples agree on 220 of 500).
+- This was the last input missing for the test-set features. The `same_as_ref` marks haven't been looked at, and stay unread until E4.
+
+### Made: the feature tables (`scripts/features.py`)
+
+- One row per question: 4 ID columns (`idx`, `question_id`, `db_id`, `difficulty`), 46 features and 2 labels. Feature groups: question (12), schema (4), the 7B's SQL and its result (7), token confidence (3), and agreement for each k = 1 to 5 (4 columns each: agreeing with the temperature-0 answer, distinct results, crashes, identical SQL text, using only the first k samples). The feature list is fixed in the script, so `difficulty`, `db_id` and anything from the 32B can't become features.
+- `outputs/features_train.csv` (1,034 rows) and `outputs/features_test.csv` (500 rows), each from its own question file, databases and runs. No empty cells: a crashed query gets `sql_rows` 0 and `sql_crashed` 1.
+- **Checks on training, all matching the earlier measurements:** labels 473 (A) and 161 (B); all 5 samples agree on 539, none on 138; 1.99 distinct results per question; ROC-AUC for A of agreement with 1 to 5 samples 0.701 / 0.742 / 0.765 / 0.775 / 0.784; mean and lowest log-probability 0.731 and 0.657; the 7B's SQL crashing 0.622; samples crashing 0.668; identical SQL text 0.657 (0.656 on 9 Oct); for B, agreement 0.778 and mean log-probability 0.663; 146 questions without a hint (56.1% right with one, 43.2% without); 75 tables and 798 columns over the 11 databases.
+- **Checks on test, counts only:** 500 rows, 251 for A and 70 for B (as in E1), no empty cells, same columns as training. No feature was scored against the test labels.
+- **Finding (training):** every 7B answer that ran and returned no rows was wrong (78 of 78), so `sql_empty` = 1 never marks a right answer.
+- Two keyword flags are rare on training: `kw_ratio` on 6 questions and `kw_difference` on 4. The others: `kw_count` 294, `kw_highest` 138, `kw_average` 58, `kw_total` 53, `kw_percent` 41, `kw_lowest` 26.
