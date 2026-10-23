@@ -1,10 +1,12 @@
 # model calls
 ollama
 tqdm
-# needed by the Mini-Dev eval and prompt scripts (they import all three DB drivers)
+
+# needed by the Mini-Dev eval and prompt scripts
 func-timeout
 pymysql
 psycopg2-binary
+
 # analysis and classifiers
 numpy
 pandas
