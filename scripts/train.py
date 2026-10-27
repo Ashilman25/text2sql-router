@@ -61,19 +61,21 @@ def model(name, seed):
     return est, grid
 
 
-# out-of-fold risk scores: settings are picked inside each training fold (nested CV)
+# out-of-fold risk scores and fold numbers; settings are picked inside each training fold (nested CV)
 def oof_scores(X, y, splits, name, seed):
     scores = np.zeros(len(y))
+    folds = np.zeros(len(y), dtype=int)
     chosen = []
-    for train, held in splits:
+    for fold, (train, held) in enumerate(splits):
         est, grid = model(name, seed)
         inner = StratifiedKFold(n_splits=3, shuffle=True, random_state=seed)
         search = GridSearchCV(est, grid, scoring="roc_auc", cv=inner, n_jobs=-1)
         search.fit(X[train], y[train])
         scores[held] = search.predict_proba(X[held])[:, 1]
+        folds[held] = fold
         chosen.append(str(search.best_params_))
 
-    return scores, chosen
+    return scores, folds, chosen
 
 
 # ranking quality, plus precision/recall when the top 20/30/50% are flagged
@@ -108,7 +110,7 @@ def main():
     ap.add_argument("--targets", default="a,b", help="comma-separated: a, b")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--out", required=True, help="CSV of mean and std per setup")
-    ap.add_argument("--scores_out", help="CSV of every question's out-of-fold score, for the routing rehearsal")
+    ap.add_argument("--scores_out", help="CSV of every question's out-of-fold score and fold, for the routing rehearsal")
     args = ap.parse_args()
 
     assert "test" not in Path(args.features).name, "train.py only reads the training table"
@@ -141,7 +143,7 @@ def main():
                         else:
                             splits = list(LeaveOneGroupOut().split(X, y, groups=df["db_id"]))
 
-                        scores, picked = oof_scores(X, y, splits, name, seed)
+                        scores, folds, picked = oof_scores(X, y, splits, name, seed)
                         per_seed.append(metrics(y, scores))
                         chosen += picked
                         score_tables.append(pd.DataFrame({
@@ -152,6 +154,7 @@ def main():
                             "features": set_name,
                             "cv": cv,
                             "seed": seed,
+                            "fold": folds,
                             "score": scores.round(6),
                         }))
 
