@@ -42,15 +42,21 @@ def feature_sets(exp, db_columns):
 def model(name, seed):
     if name == "lr":
         est = make_pipeline(StandardScaler(), LogisticRegression(class_weight="balanced", max_iter=5000))
-        grid = {"logisticregression__C": [0.01, 0.1, 1, 10]}
+        grid = {"logisticregression__C": [0.001, 0.01, 0.1, 1, 10]}
 
     elif name == "rf":
         est = RandomForestClassifier(n_estimators=300, class_weight="balanced", random_state=seed)
-        grid = {"max_depth": [6, None], "min_samples_leaf": [1, 10]}
+        grid = {
+            "max_depth": [6, None], 
+            "min_samples_leaf": [1, 10]
+        }
 
     else:
         est = HistGradientBoostingClassifier(learning_rate=0.05, class_weight="balanced", random_state=seed)
-        grid = {"max_depth": [2, 4], "max_iter": [100, 300]}
+        grid = {
+            "max_depth": [1, 2, 4], 
+            "max_iter": [50, 100, 300]
+        }
 
     return est, grid
 
