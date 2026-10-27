@@ -149,7 +149,14 @@ def main():
                             "score": scores.round(6),
                         }))
 
-                    row = {"features": set_name, "target": t, "model": name, "cv": cv, "n_features": len(cols)}
+                    row = {
+                        "features": set_name, 
+                        "target": t, 
+                        "model": name, 
+                        "cv": cv, 
+                        "n_features": len(cols)
+                    }
+                    
                     for m in per_seed[0]:
                         vals = [p[m] for p in per_seed]
                         row[f"{m}_mean"] = round(float(np.mean(vals)), 4)
@@ -157,8 +164,8 @@ def main():
 
                     row["usual_settings"] = Counter(chosen).most_common(1)[0][0]
                     results.append(row)
-                    print(f"{set_name:18} {t}  {name}  {cv:5}  ROC-AUC {row['roc_auc_mean']:.3f} ± {row['roc_auc_std']:.3f}"
-                          f"  PR-AUC {row['pr_auc_mean']:.3f} ± {row['pr_auc_std']:.3f}  F1@30% {row['f1_30_mean']:.3f}", flush=True)
+                    print(f"{set_name:18} {t}  {name}  {cv:5}  ROC-AUC {row['roc_auc_mean']:.3f} +- {row['roc_auc_std']:.3f}"
+                          f"  PR-AUC {row['pr_auc_mean']:.3f} +- {row['pr_auc_std']:.3f}  F1@30% {row['f1_30_mean']:.3f}", flush=True)
 
     pd.DataFrame(results).to_csv(args.out, index=False)
     print(f"saved {len(results)} setups to {args.out}")
