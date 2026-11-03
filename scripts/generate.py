@@ -40,6 +40,50 @@ def clean_sql(text):
     return re.sub(r"\s*\n\s*", " ", sql).strip()
 
 
+# the official Mini-Dev prompt for one question, schema read from its own database
+def build_prompt(q, db_root, evidence=True):
+    db_path = f"{db_root.rstrip('/')}/{q['db_id']}/{q['db_id']}.sqlite"
+    return generate_combined_prompts_one(
+        db_path=db_path,
+        question=q["question"],
+        sql_dialect="SQLite",
+        knowledge=q.get("evidence") if evidence else None,
+    )
+
+
+# one chat call to Ollama; returns the sample record saved in the cache
+def ask(model, prompt, temperature, seed, num_ctx=16384, max_tokens=1024, logprobs=False):
+    start = time.time()
+    resp = ollama.chat(
+        model=model,
+        messages=[{
+            "role": "user",
+            "content": prompt
+        }],
+        options={
+            "temperature": temperature,
+            "num_ctx": num_ctx,
+            "num_predict": max_tokens,
+            "seed": seed,
+        },
+        logprobs=logprobs or None,
+    )
+
+    reply = resp["message"]["content"]
+    sample = {
+        "raw": reply,
+        "sql": clean_sql(reply),
+        "seconds": round(time.time() - start, 2),
+        "prompt_tokens": resp.get("prompt_eval_count") or 0,
+        "output_tokens": resp.get("eval_count"),
+        "done_reason": resp.get("done_reason"),
+    }
+    if logprobs:
+        sample["logprobs"] = [[t.token, round(t.logprob, 5)] for t in resp.get("logprobs") or []]
+
+    return sample
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--questions", required=True, help="mini_dev_sqlite.json or dev.json")
@@ -71,47 +115,13 @@ def main():
             if idx in done:
                 continue
             
-            db_path = f"{args.db_root.rstrip('/')}/{q['db_id']}/{q['db_id']}.sqlite"
-            prompt = generate_combined_prompts_one(
-                db_path=db_path,
-                question=q["question"],
-                sql_dialect="SQLite",
-                knowledge=None if args.no_evidence else q.get("evidence"),
-            )
-            
+            prompt = build_prompt(q, args.db_root, evidence=not args.no_evidence)
+
             samples = []
             for s in range(args.samples):
-                start = time.time()
-                resp = ollama.chat(
-                    model=args.model,
-                    messages=[{
-                        "role": "user",
-                        "content": prompt
-                    }],
-                    options={
-                        "temperature": args.temperature,
-                        "num_ctx": args.num_ctx,
-                        "num_predict": args.max_tokens,
-                        "seed": s,
-                    },
-                    logprobs=args.logprobs or None,
-                )
-                
-                prompt_tokens = resp.get("prompt_eval_count") or 0
-                if prompt_tokens >= 0.95 * args.num_ctx:
+                sample = ask(args.model, prompt, args.temperature, s, args.num_ctx, args.max_tokens, args.logprobs)
+                if sample["prompt_tokens"] >= 0.95 * args.num_ctx:
                     print(f"\nwarning: question {idx} may be cut off, raise --num_ctx")
-                    
-                reply = resp["message"]["content"]
-                sample = {
-                    "raw": reply,
-                    "sql": clean_sql(reply),
-                    "seconds": round(time.time() - start, 2),
-                    "prompt_tokens": prompt_tokens,
-                    "output_tokens": resp.get("eval_count"),
-                    "done_reason": resp.get("done_reason"),
-                }
-                if args.logprobs:
-                    sample["logprobs"] = [[t.token, round(t.logprob, 5)] for t in resp.get("logprobs") or []]
 
                 samples.append(sample)
                 
