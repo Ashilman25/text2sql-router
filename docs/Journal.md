@@ -711,3 +711,68 @@ Chosen from the training rehearsal only. The test feature table and the test sam
 - **On the test set the difficulty label is a little above random** (+0.6 to +1.4 points at 20, 30 and 50%), unlike training; its significance against random wasn't part of the frozen tests.
 - **Routing gains are smaller in points on test than on training,** as expected from the smaller gap between the models (8.0 vs. 10.15 points): router A is +3.6 to +5.0 over random on test against +5.6 to +6.0 on training.
 - Many comparisons were run; the hypothesis verdicts above use only the pre-registered comparisons for router A.
+
+## 2026-11-02: E4, official scores of the routed files
+
+### Result: official EX and Soft F1 of the 8 routed files (test, 400 s, idle machine)
+
+Scored with `evaluation_ex.py` and `evaluation_f1.py` from Mini-Dev, as frozen. **All 8 official EX totals equal the per-question numbers from `route.py`**, so the 2026-10-27 hypothesis verdicts stand unchanged: H2 partly holds, H3 holds at the rule's own share, H5 not supported, H6 holds.
+
+| Routed file (test) | Escalated | EX (simple / moderate / challenging) | EX total | Soft F1 (simple / moderate / challenging) | Soft F1 total |
+| --- | --- | --- | --- | --- | --- |
+| Always-small (7B, E1) | 0 | 66.22 / 47.20 / 32.35 | 49.80 | 68.01 / 50.64 / 35.45 | 52.68 |
+| A at 20% | 100 | 71.62 / 54.00 / 38.24 | 56.00 | 74.39 / 58.15 / 42.28 | 59.72 |
+| A at 30% | 150 | 72.30 / 55.20 / 40.20 | 57.20 | 75.14 / 59.77 / 44.09 | 61.12 |
+| A at 50% | 250 | 70.95 / 55.60 / 42.16 | 57.40 | 73.79 / 60.89 / 47.39 | 61.95 |
+| B at 20% | 100 | 71.62 / 54.40 / 42.16 | 57.00 | 74.39 / 58.55 / 46.30 | 60.74 |
+| B at 30% | 150 | 72.30 / 54.80 / 43.14 | 57.60 | 75.07 / 59.18 / 46.92 | 61.38 |
+| B at 50% | 250 | 72.30 / 56.00 / 43.14 | 58.20 | 74.60 / 60.19 / 48.51 | 62.07 |
+| A at the rule's share | 173 | 72.30 / 55.60 / 41.18 | 57.60 | 75.14 / 60.44 / 45.61 | 61.76 |
+| Agreement rule (at most 2 of 5) | 173 | 69.59 / 54.00 / 36.27 | 55.00 | 72.37 / 58.04 / 42.37 | 59.09 |
+| Always-large (32B, E1) | 500 | 72.30 / 54.80 / 44.12 | 57.80 | 74.97 / 59.32 / 47.89 | 61.62 |
+
+### Findings
+
+- **Soft F1 tells the same story as EX.** It is 3.7 to 4.6 points above EX for every routed file. Router A beats the agreement rule at the rule's share by +2.67 Soft F1 (EX +2.6). B is ahead of A by +1.02 / +0.26 / +0.12 Soft F1 at 20 / 30 / 50% (EX +1.0 / +0.4 / +0.8). There is no paired test on Soft F1, because only EX has per-question marks.
+- **By Soft F1, routing passes always-large sooner than by EX.** A at the rule's share (61.76, 34.6% escalated), A at 50% (61.95) and B at 50% (62.07) are all above always-large's 61.62. By EX, only B at 50% is above always-large among these files (58.20 vs. 57.80).
+- **B's lead over A at 20% is mostly on challenging questions:** 285 vs. 280 correct, made up of +4 challenging and +1 moderate, with simple tied (106 each).
+- **Escalating more can break simple questions the 7B had right.** From 30% to 50%, router A sends 100 more questions to the 32B for a net +1 question: simple −2 (107 to 105), moderate +1, challenging +2. B at 50% matches always-large on simple (107), is above it on moderate (140 vs. 137) and gets one fewer challenging question (44 vs. 45).
+
+## 2026-11-02: E5, time and cost per router
+
+### Decision: E5 choices (before any E5 number is computed)
+
+- **Questions and routers:** the 500 test questions and every E4 router, with E4's escalated questions. `scripts/cost.py` rebuilds the queues from `e4_scores.csv` with `route.py`'s ranking and tie-break, and stops unless its EX equals `e4_routers.csv` at 20, 30 and 50% for all 12 routers.
+- **Seconds per question:** the model calls plus running their SQL, one question at a time on this laptop (Apple M5 Max, 64 GB, Ollama 0.35.1, the 4-bit models). Building the features and running the classifier take milliseconds and are left out.
+- **Routers that decide after the 7B answers:** the 7B's answer, its k tries and running their SQL for every question, plus the 32B call and running its SQL for the escalated ones. k is 1 for router A, 0 for B, the crash rule and the oracle, 0, 3 or 5 for the extra A curves, and 5 for the agreement rule and for A with the majority answer kept.
+- **Routers that decide before the 7B answers** (random, the difficulty label, the question-only router): escalated questions go straight to the 32B and skip the 7B. Always-large is the 32B call alone.
+- **Tries in a row vs. together:** in a row means the answer, then each try after the last one; together means the answer and the k tries sent at once, timed until the last reply. Together is measured for k = 1, 3 and 5 (no router uses 2 or 4).
+- **Timing run** (`scripts/timing.py`, one sitting, idle machine, questions in file order, an untimed warm-up call before each pass): first the together passes for k = 1, 3 and 5 on a server started with `OLLAMA_NUM_PARALLEL=6`; then, on the normal server, the 7B's answer and 5 tries in a row, and the 32B's answer. Both servers use the Homebrew service's settings (`OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`), so the only difference is answering requests in parallel. The parallel server only holds the 7B: in a 3-question smoke test, the 32B took 45 GB there with 6 slots (default KV cache) and pushed the 7B out. The requests are the saved runs' requests: temperature 0 with log-probabilities for the 7B's answer, 0.7 with seeds 0 to 4 for the tries, temperature 0 for the 32B. The timed replies are only used for their seconds; the routers keep the saved answers. The saved runs' seconds are reported as well, to show how much timing moves between sittings (the 7B's answer took 0.99 s per question in E1 and 0.86 s in the 10 Oct log-probability run).
+- **Running the SQL:** the seconds saved by `check.py` (about 0.04 s per query).
+- **Tokens:** from the saved runs, which hold the replies the routers used.
+- **Dollars:** only 32B calls are paid, at OpenRouter's listed price for `qwen/qwen-2.5-coder-32b-instruct` (served by Cloudflare): $0.66 per million input tokens and $1.00 per million output tokens, checked 2 Nov 2026. Together AI lists $0.80 / $0.80, but only on dedicated servers. Each router's spend is also given as a share of always-large's, which barely depends on the price.
+- **Points reported:** always-small, always-large, each router at 20, 30 and 50%, the crash and agreement rules and router A at the rules' own shares, and each router's first point matching always-large's EX. E5 decides no hypothesis.
+
+### Result: E5 from the saved runs' seconds (`cost.py` without `--timing`)
+
+`python scripts/cost.py --price_in 0.66 --price_out 1.00 --out outputs/e5_saved`. EX equals E4's for all 12 routers at 20, 30 and 50%, so the escalated questions are E4's. No together times here; those come from the timing run.
+
+- **Per test question, saved runs:** the 7B's answer 0.986 s, one try 0.909 s (5 in a row 4.546 s), the 32B's answer 4.146 s; running the SQL 0.037 s (7B answer), 0.185 s (5 tries) and 0.047 s (32B answer). Tokens: prompt 1,014 on average, replies 56 (7B) and 59 (32B). At the frozen price the 32B costs $0.728 per 1,000 questions.
+
+| Router | Escalated | EX | Seconds per question (tries in a row) | $ per 1,000 questions | $ vs. always-large |
+| --- | --- | --- | --- | --- | --- |
+| Always-small | 0% | 49.80 | 1.022 | 0 | 0% |
+| B (0 tries) | 20 / 30 / 50% | 57.00 / 57.60 / 58.20 | 1.979 / 2.482 / 3.272 | 0.139 / 0.208 / 0.352 | 19.1 / 28.6 / 48.4% |
+| B, first match of always-large | 30.2% | 57.80 | 2.488 | 0.210 | 28.8% |
+| A (1 try) | 20 / 30 / 50% | 56.00 / 57.20 / 57.40 | 3.050 / 3.604 / 4.480 | 0.138 / 0.216 / 0.362 | 19.0 / 29.7 / 49.7% |
+| A, first match of always-large | 40.8% | 57.80 | 4.077 | 0.297 | 40.8% |
+| A with 0 tries, first match | 33.0% | 57.80 | 2.728 | 0.235 | 32.2% |
+| Agreement rule (5 tries) | 20 / 30 / 50% | 55.20 / 55.20 / 56.60 | 6.775 / 7.274 / 8.141 | 0.145 / 0.220 / 0.361 | 19.9 / 30.3 / 49.6% |
+| Agreement rule at its share | 34.6% | 55.00 | 7.475 | 0.252 | 34.6% |
+| Question-only router | 20 / 30 / 50% | 50.80 / 52.00 / 54.00 | 1.772 / 2.128 / 2.817 | 0.138 / 0.212 / 0.364 | 18.9 / 29.2 / 50.0% |
+| Always-large | 100% | 57.80 | 4.193 | 0.728 | 100% |
+
+- **Dollars follow the share escalated almost exactly** (within 1.6 points at every reported point; B's escalated questions are slightly shorter): escalated questions have about average prompt and reply lengths, so the price only scales the dollar column.
+- **With no tries, routing saves time as well as money:** B matches always-large's EX at 59% of its time (2.49 vs. 4.19 s) and 29% of its dollars.
+- **One try in a row eats most of the time saving:** router A first matches always-large at 4.08 s, only 3% faster than always-large, though at 41% of its dollars.
+- **Five tries in a row make a router slower than always-large at every share** (the agreement rule: 6.8 to 9.1 s). Whether sending the tries together fixes this is what the timing run measures.
