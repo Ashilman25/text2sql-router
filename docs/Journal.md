@@ -776,3 +776,77 @@ Scored with `evaluation_ex.py` and `evaluation_f1.py` from Mini-Dev, as frozen. 
 - **With no tries, routing saves time as well as money:** B matches always-large's EX at 59% of its time (2.49 vs. 4.19 s) and 29% of its dollars.
 - **One try in a row eats most of the time saving:** router A first matches always-large at 4.08 s, only 3% faster than always-large, though at 41% of its dollars.
 - **Five tries in a row make a router slower than always-large at every share** (the agreement rule: 6.8 to 9.1 s). Whether sending the tries together fixes this is what the timing run measures.
+
+## 2026-11-06: E5, the timing run
+
+### Run: `scripts/timing.py`, all 5 passes on the 500 test questions
+
+- **Together passes** (answer + 1, 3 and 5 tries sent at once, 7B only, server with `OLLAMA_NUM_PARALLEL=6`, `OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q8_0`): 15:25, 28:57 and 32:15 min. The parallel check before each pass (the same 128-token request) took 1.54 / 2.11 / 2.52 s alone and 3.07 / 6.10 / 6.84 s six at once, so the server answered in parallel every time.
+- **Sequential and 32B passes** on the Homebrew service (same flash-attention and KV-cache settings, no parallel setting). Changed from the frozen plan: the run was not one sitting. The together passes ran on 2 Nov and the last two passes finished on 5 Nov. The sequential pass was stopped after 6 questions and resumed, with a new untimed warm-up first.
+- **Temperature 0 is not fully repeatable here.** The timed answer SQL equals the saved run's for 479 / 480 / 473 / 481 of 500 questions (sequential, together 1 / 3 / 5) and 493 of 500 for the 32B. The timed replies are only used for their seconds; EX, tokens and dollars come from the saved runs.
+- **Slowdown check:** each together pass's time divided by the in-a-row time for the same questions shows no rise from the first 100 questions to the last 100 (k = 1: 0.78 / 1.16 / 0.99 / 0.92 / 0.96; k = 5: 0.87 / 0.72 / 0.65 / 0.65 / 0.64). So the slower single requests in the parallel checks don't show up in the question timings.
+
+### Result: E5 with the timing run's seconds (`cost.py --timing`)
+
+`python scripts/cost.py --timing outputs/timing_minidev.jsonl --price_in 0.66 --price_out 1.00 --out outputs/e5`. EX equals E4's for all 12 routers at 20, 30 and 50%.
+
+- **Per call:**
+
+  | Call | Timing run | Saved runs | Change |
+  | --- | --- | --- | --- |
+  | 7B answer | 1.064 s | 0.986 s | +8% |
+  | 7B try | 0.902 s | 0.909 s | −1% |
+  | 32B answer | 4.040 s | 4.146 s | −3% |
+
+  The 7B's answer moves the most between sittings: 0.86 s in the 10 Oct log-probability run, 0.99 s in E1 and 1.06 s here.
+- **Answer + tries, in a row vs. together:**
+
+  | Tries | In a row | Together | Saved |
+  | --- | --- | --- | --- |
+  | 1 | 1.901 s | 1.851 s | 0.049 s (2.6%) |
+  | 3 | 3.755 s | 3.475 s | 0.281 s (7.5%) |
+  | 5 | 5.572 s | 3.871 s | 1.702 s (30.5%) |
+
+| Router | Escalated | EX | Seconds per question (in a row / together) | Seconds vs. always-large (in a row / together) | $ per 1,000 questions | $ vs. always-large |
+| --- | --- | --- | --- | --- | --- | --- |
+| Always-small | 0% | 49.80 | 1.101 | 27% | 0 | 0% |
+| Oracle, first match of always-large | 8.0% | 57.80 | 1.442 | 35% | 0.055 | 7.5% |
+| Crash rule at its share | 11.4% | 54.00 | 1.641 | 40% | 0.079 | 10.8% |
+| B (0 tries) | 20 / 30 / 50% | 57.00 / 57.60 / 58.20 | 2.028 / 2.518 / 3.285 | 50 / 62 / 80% | 0.139 / 0.208 / 0.352 | 19.1 / 28.6 / 48.4% |
+| B, first match | 30.2% | 57.80 | 2.524 | 62% | 0.210 | 28.8% |
+| A with 0 tries, first match | 33.0% | 57.80 | 2.763 | 68% | 0.235 | 32.2% |
+| A (1 try) | 20 / 30 / 50% | 56.00 / 57.20 / 57.40 | 2.978 / 3.506 / 4.337 and 2.929 / 3.457 / 4.287 | 73 / 86 / 106% and 72 / 85 / 105% | 0.138 / 0.216 / 0.362 | 19.0 / 29.7 / 49.7% |
+| A at the agreement rule's share | 34.6% | 57.60 | 3.695 / 3.646 | 90 / 89% | 0.248 | 34.1% |
+| A, first match | 40.8% | 57.80 | 3.961 / 3.912 | 97 / 96% | 0.297 | 40.8% |
+| A with 3 tries, first match | 27.6% | 57.80 | 5.322 / 5.041 | 130 / 123% | 0.197 | 27.1% |
+| A with 5 tries, first match | 33.6% | 57.80 | 7.468 / 5.767 | 183 / 141% | 0.247 | 33.9% |
+| Agreement rule (5 tries) | 20 / 30 / 50% | 55.20 / 55.20 / 56.60 | 6.786 / 7.282 / 8.121 and 5.085 / 5.580 / 6.420 | 166 / 178 / 199% and 124 / 137 / 157% | 0.145 / 0.220 / 0.361 | 19.9 / 30.3 / 49.6% |
+| Agreement rule at its share | 34.6% | 55.00 | 7.473 / 5.772 | 183 / 141% | 0.252 | 34.6% |
+| Question-only router | 20 / 30 / 50% | 50.80 / 52.00 / 54.00 | 1.815 / 2.149 / 2.779 | 44 / 53 / 68% | 0.138 / 0.212 / 0.364 | 18.9 / 29.2 / 50.0% |
+| Always-large | 100% | 57.80 | 4.086 | 100% | 0.728 | 100% |
+
+The together column is the same as in a row for routers with no tries.
+
+### Findings
+
+- **The timing run confirms the saved-run numbers.** Every reported point is within 0.15 s of the 2 Nov table (the largest gap is A at 50%, 4.337 vs. 4.480 s): B's first match 2.524 vs. 2.488 s, A's 3.961 vs. 4.077 s, the agreement rule at its share 7.473 vs. 7.475 s, always-large 4.086 vs. 4.193 s. The dollar columns are unchanged.
+- **Only routers without tries save time.** B matches always-large's EX at 62% of its time and 29% of its dollars, and A with 0 tries at 68% and 32%. Router A with 1 try costs 41% of the dollars but almost the same time (97% in a row, 96% together).
+- **Sending the tries together only pays off at 5 tries, and not enough.** Even together, the answer plus 5 tries take 3.871 s, 96% of one 32B answer (4.040 s). So every 5-try router is slower than always-large at every share. The agreement rule at its share takes 141% of always-large's time for 35% of its dollars and 2.8 points less EX.
+- **The likely reason is that the in-a-row requests reuse the processed prompt.** I fit seconds = a + b · reply tokens + c · prompt tokens per call type:
+
+  | Call type | Seconds per 1,000 prompt tokens |
+  | --- | --- |
+  | 7B in a row | 0.07 to 0.13 |
+  | 32B (one at a time) | 0.07 |
+  | 7B, answer + 1 try together | 0.77 to 0.79 |
+  | 7B, answer + 5 tries together | 0.24 |
+
+  On the normal server the prompt is mostly already processed: the tries share the answer's prompt, and consecutive questions on the same database share the schema. Sent together, the requests go to different server slots and mostly process the prompt again. On prompts of 1,500+ tokens (51 questions), the answer plus 1 try together take 1.46 times as long as in a row. With 5 tries, decoding the replies in one batch outweighs this. A server that reads the prompt once and decodes all k + 1 replies together might do better; I haven't tested one.
+- **Time saving is smaller than dollar saving because the escalated questions are slow on the 32B.**
+
+  | Questions | 32B seconds | Reply tokens | Prompt tokens |
+  | --- | --- | --- | --- |
+  | B's first 151 escalated | 4.66 | 69.3 | 947 |
+  | All 500 | 4.04 | 59.1 | 1,014 |
+
+  For the 32B, each reply token takes about 60 ms, while the prompt is mostly reused. So time follows reply length, and dollars mostly follow prompt length. The replies of A's first 204 escalated questions (72.4 tokens) and A-with-0-tries' first 165 (75.2) are also 17 to 27% longer than average. This corrects the 2 Nov finding that escalated questions have about average reply lengths.
