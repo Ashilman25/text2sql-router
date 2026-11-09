@@ -1,15 +1,18 @@
+# Python 3.11. Versions are the ones every reported number was produced with.
+
 # model calls
-ollama
-tqdm
+ollama==0.6.3
+tqdm==4.70.1
 
 # needed by the Mini-Dev eval and prompt scripts
-func-timeout
-pymysql
-psycopg2-binary
+func-timeout==4.3.5
+pymysql==1.2.3
+psycopg2-binary==2.9.13
 
 # analysis and classifiers
-numpy
-pandas
-scikit-learn
-matplotlib
-jupyter
+numpy==2.4.6
+pandas==3.0.6
+scipy==1.17.1
+scikit-learn==1.9.1
+matplotlib==3.11.2
+jupyter==1.1.1
