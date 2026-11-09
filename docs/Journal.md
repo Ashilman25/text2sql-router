@@ -850,3 +850,59 @@ The together column is the same as in a row for routers with no tries.
   | All 500 | 4.04 | 59.1 | 1,014 |
 
   For the 32B, each reply token takes about 60 ms, while the prompt is mostly reused. So time follows reply length, and dollars mostly follow prompt length. The replies of A's first 204 escalated questions (72.4 tokens) and A-with-0-tries' first 165 (75.2) are also 17 to 27% longer than average. This corrects the 2 Nov finding that escalated questions have about average reply lengths.
+
+---
+
+## 2026-11-08: E6, routing on databases the router has never seen
+
+### Why
+
+Training and test questions share the same 11 BIRD databases. Leave-one-database-out in E2 suggested the clues carry over to a new database, but the routers themselves have only been tested on databases they were trained on. E6 routes questions from BIRD's own training set, whose 69 databases are disjoint from the 11, with the routers frozen on 27 Oct and no retraining. It is an extra experiment, not in the proposal.
+
+### Data check: BIRD's training set (no model run)
+
+- **Download:** `train.zip` from the BIRD site, 8,919,543,554 bytes (last modified 11 Jul 2023), holding `train.json`, `train_gold.sql`, `train_tables.json` and `train_databases.zip`. The `dev.zip` at the same address is byte-identical to the copy used since 5 Oct. Unpacked: 69 databases, 30 GB, every one with its `.sqlite`. 9,428 questions, 6 to 474 per database (median 116). Stored as `data/train/train.json` and `data/train/train_databases/`.
+- **No `difficulty` and no `question_id` field.** Each question has only `db_id`, `question`, `evidence` and `SQL`. So E6 has no difficulty baseline. 645 questions (6.8%) have no hint, against 14.1% on our training questions and 0.4% on Mini-Dev.
+- **No overlap with the 11 dev databases:** no shared database names, the highest column-name overlap between any BIRD train database and any dev database is 13% (generic names like `CustomerID`, and `european_football_1` has a different schema from `european_football_2`), and no question text matches a dev question.
+- **Gold queries,** run once each, read-only, 400 s limit, 8 at a time: 9,076 run, 350 fail with errors and 2 time out (6759 on `retails`, 8190 on `sales_in_weather`). The slowest that finished took 150 s, 6 took over 30 s and 31 over 10 s (times measured under load).
+- **`retail_world`'s gold is written for another schema:** 330 of its 373 gold queries use tables and columns (`Territories`, `Region`, `TitleOfCourtesy`, `ShipVia`) that the shipped database doesn't have. The gold matches the full Northwind database, the shipped file a cut-down one. The other 20 errors: `works_cycles` 10 (missing `PersonPhone` table), `app_store` 6, `shooting` 4. Every database's tables match `train_tables.json`.
+- **Gold that returns nothing:** 283 gold queries return no rows, against 0 of 1,534 in dev and 0 of 500 in Mini-Dev, so BIRD filtered these out of dev. 53 return only NULL, against 1 in dev and 2 in Mini-Dev.
+- **Other gold problems:** 123 gold queries use `LIMIT` without `ORDER BY` and can return arbitrary rows (dev 5, Mini-Dev 3). 13 questions appear twice on the same database, 8 of them with different gold SQL. Published work says BIRD train is largely unchecked, with errors found in 18.2% of one checked subset (Pourreza and Rafiei, cited in arXiv 2603.20004), against 20.7% erroneous gold in dev's financial questions (Wretblad et al., 2024).
+- **Prompt length** (the official prompt, tokens estimated at the 0.200 to 0.285 tokens per character measured on our runs): the median database's longest prompt is about 600 tokens. The longest is `works_cycles` (65 tables, 455 columns) at 38,022 characters, about 8,500 tokens and at most 10,800, inside the 16,384 window. `mondial_geo` and `hockey` are the only others above the longest training prompt (2,268 tokens).
+- **Schema size:** 16 databases (2,622 questions) are outside the training range of `db_tables` (3 to 13) or `db_columns` (11 to 199), both features of router A.
+- **The official scorer can't score unlabelled questions:** `evaluation_ex.py` divides by the size of each difficulty group, so an empty group crashes it. Its total doesn't depend on the labels.
+
+### Decision: frozen choices for E6 (before any E6 model run)
+
+Chosen from the data check above. No model has been run on any BIRD train question.
+
+- **Exclusions** (the first rule a question breaks, counts over all 9,428): the `retail_world` database 373, gold returns no rows 280, `LIMIT` without `ORDER BY` 111, gold returns only NULL 53, gold error 20, duplicate question with different gold (every copy) 14, repeat of an earlier question with the same gold 4, gold timeout at 400 s 2. That leaves 8,571 questions on 68 databases. Large schemas (including `works_cycles`), questions without a hint and slow gold that finishes are kept.
+- **Sample:** 500 questions, at most 8 per database, seed 0. Every BIRD train question gets one fixed random position (seed 0) before exclusions, then questions are taken in that order, skipping excluded ones and databases that already have 8, until 500 are taken. The cap makes each database count about equally, since databases are the unit E6 generalises over. The fixed order means an exclusion only changes its own slot.
+- **Runs:** the 7B's answer at temperature 0 with log-probabilities (used both as the routed answer and for the confidence features), 5 tries at temperature 0.7 with seeds 0 to 4, and the 32B's answer at temperature 0. Same models, `num_ctx` 16,384 and `max_tokens` 1,024 as before. Each run once, and a run that stops is resumed with the same command. No question is dropped after the runs.
+- **Routers, exactly as frozen on 27 Oct:** router A (logistic regression, C = 1, `plus_agree_k1`) and router B (gradient boosting, depth 1, 50 rounds, `plus_answer`), each fit once on the 1,034 training questions by `route.py --mode final`. Escalate the top 20, 30 and 50% of the risk scores (100, 150 and 250 questions), ties broken by one fixed random order (seed 0). The agreement rule is "at most 2 of 5 tries agree". The extra curves (A with 0, 3 and 5 tries, the question-only router, A with the majority answer kept) come out of the same run and are reported as extras only.
+- **Labels:** right/wrong from `check.py` (same rule and 400 s shared limit as the official scorer), run on an idle machine.
+- **Reported:** always-7B, always-32B, the oracle and the majority answer. For random, the crash rule, the agreement rule, A, B and the extras: EX at 20, 30 and 50%, mean EX over 10 to 50%, and the share matching always-32B. The rule routers at their own shares.
+- **Paired tests,** as in E4 (bootstrap with 10,000 resamples of the questions, seed 0, 95% range from the 2.5th and 97.5th percentiles, and McNemar's exact test): A and B against the crash rule and the agreement rule at 20, 30 and 50%, and against the agreement rule at its own E6 share. Against random, bootstrap only: the random router's outcome is an expected value, not a draw, so McNemar's test doesn't apply. B against A at 20, 30 and 50%.
+- **Secondary, decide nothing** (`scripts/unseen_stats.py`): a bootstrap that resamples whole databases (68, with replacement, 10,000 times, seed 0) for A and B against random, since questions on one database aren't independent. ROC-AUC and PR-AUC of A's and B's scores and of agreement alone, next to Mini-Dev's. The same comparison with random on the questions whose database is inside the training range of `db_tables` and `db_columns`, ranked and escalated within that subset.
+- **Official scores:** the 8 routed files plus always-7B and always-32B, EX and Soft F1, with `evaluation_ex.py` and `evaluation_f1.py` at 400 s on an idle machine. They use placeholder difficulty labels (simple, moderate, challenging in turn) so no group is empty, and only the total is read. EX must equal what the per-question marks give.
+- **Hypotheses,** numbered after the proposal's H1 to H6, decided on router A only:
+  - **H7 (main):** router A beats random at 20, 30 and 50% escalated on unseen databases. Holds if all three per-question bootstrap ranges are above 0, partly holds if one or two are. The database-resampled ranges are reported next to them and don't decide H7.
+  - **H8:** router A beats the agreement rule at the rule's own E6 share (bootstrap range above 0, McNemar p reported). This repeats H3.
+  - **H9:** router A matches always-32B's EX while escalating at most 50%. This repeats H6. If the 32B is not more accurate than the 7B on these questions, H9 is reported as not tested.
+
+### Made: `scripts/make_unseen.py` and the sample
+
+- `python scripts/make_unseen.py data/train` runs every gold query, applies the exclusions and the sampling above, and writes `data/train/unseen.json` (Mini-Dev's question format, `question_id` = position in BIRD's `train.json`, `difficulty` empty), `unseen_gold.sql` and `unseen_scorer.jsonl` (for the official scorer, placeholder labels). 11 min 43 s. Its exclusion counts and timeouts are exactly the ones listed above.
+- **The sample:** 500 questions on all 68 databases, 1 to 8 per database, 54 at the cap. Under the cap: `citeseer` and `genes` 1, `craftbeer` 2, `food_inspection` and `shooting` 4, 9 others 5 to 7. 20 without a hint (4.0%). sha256 of the sampled `question_id` list joined by commas: `f9fb64a2b31878d20f37c83f976470c40f961753cb29199baaad9a6971bb359b`.
+- **Prompts:** 3,699 characters on average (Mini-Dev 4,442), about 830 tokens. The longest is a `works_cycles` question at 37,796 characters, about 8,500 tokens and at most 10,800. 24 questions are above the longest training prompt. Slowest gold in the sample: 19.0 s, 2 over 10 s.
+- **Gold check:** the gold SQL scored as predictions gives 100.00 with `check.py`, and EX 100.00 and Soft F1 100.00 with the official scorers (400 s).
+
+### Made: `route.py` change and `scripts/unseen_stats.py`, E4 still reproduces
+
+- `route.py` skips the difficulty router, its rule points and its baseline when the question set has no difficulty labels, and now tests every classifier against the crash rule as well.
+- **E4 rerun with the changed script** (`--out outputs/e4check`, same command otherwise): `e4_routers.csv`, the curves, the risk scores and all 8 routed files are identical to E4's. All 76 test rows are identical, and 21 crash-rule rows are new.
+- `unseen_stats.py` run on Mini-Dev reproduces E4's bootstrap ranges against random exactly for A and B. On Mini-Dev every question is inside the training range, so its subset is the whole set.
+- **E4 reference numbers added today** (test set, not pre-registered, computed after the E6 choices above were set, nothing chosen from them):
+  - Against the crash rule: A +1.8 [+0.00, +3.80] p 0.093, +2.4 [+0.20, +4.80] p 0.050, +1.4 [−1.00, +3.80] p 0.31 at 20, 30 and 50%. B +2.8 [+1.00, +4.60] p 0.0043, +2.8 [+0.60, +5.20] p 0.024, +2.2 [−0.20, +4.60] p 0.11.
+  - ROC-AUC / PR-AUC for label A: router A 0.845 / 0.872, B 0.829 / 0.839, agreement alone 0.782 / 0.778 (base rate 0.502). For label B: A 0.736 / 0.256, B 0.753 / 0.269, agreement alone 0.708 / 0.262 (base rate 0.140).
+  - Database-resampled ranges for A against random (only 11 databases, so rough): [+2.82, +6.63], [+2.84, +7.28], [+2.07, +5.21] at 20, 30 and 50%, close to the per-question ranges.
