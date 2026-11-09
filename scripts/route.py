@@ -19,7 +19,8 @@ DIFFICULTY = {
     "moderate": 1, 
     "challenging": 2
 }
-BASELINES = ["random", "difficulty", "agreement rule"]
+# difficulty is skipped for question sets without BIRD's labels
+BASELINES = ["random", "difficulty", "crash rule", "agreement rule"]
 
 # classifier candidates; before_generation is only a comparison curve, never picked
 CANDIDATES = [("a", "lr"), ("a", "gb"), ("b", "gb")]
@@ -322,11 +323,14 @@ def main():
     # rule routers at their own shares
     # where the answer doesnt depend on a tiebreak
     agree = df["agree_k5"].to_numpy()
+    has_difficulty = bool(df["difficulty"].notna().all())
     points = [
         ("crashed", df["sql_crashed"].to_numpy() == 1, small),
         *[(f"at most {j} of 5 agree", agree <= j, small) for j in range(5)],
-        ("challenging", df["difficulty"].to_numpy() == "challenging", small),
-        ("challenging + moderate", df["difficulty"].to_numpy() != "simple", small),
+        *([
+            ("challenging", df["difficulty"].to_numpy() == "challenging", small),
+            ("challenging + moderate", df["difficulty"].to_numpy() != "simple", small),
+        ] if has_difficulty else []),
         ("oracle", large - small == 1, small),
         ("oracle, majority kept", large - major == 1, major),
     ]
@@ -346,7 +350,7 @@ def main():
     one_fold = np.zeros(n, dtype=int)
     refs = {
         "random": router(small, None, tiebreak),
-        "difficulty": router(small, [(df["difficulty"].map(DIFFICULTY).to_numpy(), one_fold)], tiebreak),
+        **({"difficulty": router(small, [(df["difficulty"].map(DIFFICULTY).to_numpy(), one_fold)], tiebreak)} if has_difficulty else {}),
         "crash rule": router(small, [(df["sql_crashed"].to_numpy(), one_fold)], tiebreak),
         "agreement rule": router(small, [(-agree, one_fold)], tiebreak),
         "oracle": router(small, [(large - small, one_fold)], tiebreak),
@@ -371,8 +375,9 @@ def main():
     tests = select(classifiers, large, boot) if args.mode == "rehearse" else []
 
     shares = {f"{s:.0%}": round(s * n) for s in SHARES}
+    baselines = [b for b in BASELINES if b in refs]
     for name, r in classifiers.items():
-        for base in BASELINES:
+        for base in baselines:
             for label, m in shares.items():
                 tests.append(test(name, r, base, refs[base], large, m, label, boot))
 
@@ -380,10 +385,10 @@ def main():
 
     t = pd.DataFrame(tests)
     print("\nEX difference vs baselines in points, * = 95% range excludes 0 (ranges and McNemar p in the tests CSV)")
-    print(f"columns: random 20/30/50%, difficulty 20/30/50%, agreement rule 20/30/50% and at its own {rule_label}")
+    print("columns: " + ", ".join(f"{b} 20/30/50%" for b in baselines) + f", agreement rule at its own {rule_label}")
     for name in classifiers:
         cells = []
-        for base in BASELINES:
+        for base in baselines:
             for label in [*shares, rule_label] if base == "agreement rule" else [*shares]:
                 row = t[(t["router"] == name) & (t["baseline"] == base) & (t["share"] == label)].iloc[0]
                 star = "" if row["includes_zero"] else "*"

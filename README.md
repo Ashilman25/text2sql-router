@@ -2,7 +2,7 @@
 
 Andrew Shilman and David Cho, San José State University, Fall 2026
 
-A small local model answers every text-to-SQL question first. A classifier then predicts whether that answer is wrong, using signals that exist only after the SQL has been run: whether it executed, what it returned, the model's token log-probabilities, and how often repeated samples return the same result. Questions the classifier flags are escalated to a larger model. We compare this router against random routing, BIRD's difficulty label, simple execution rules, always-small, always-large and an oracle on BIRD Mini-Dev (SQLite, 500 questions).
+A small local model answers every text-to-SQL question first. A classifier then predicts whether that answer is wrong, using signals that exist only after the SQL has been run: whether it executed, what it returned, the model's token log-probabilities, and how often repeated samples return the same result. Questions the classifier flags are escalated to a larger model. We compare this router against random routing, BIRD's difficulty label, simple execution rules, always-small, always-large and an oracle on BIRD Mini-Dev (SQLite, 500 questions), and then on 500 questions from 68 BIRD databases the router never saw in training.
 
 ## Main results
 
@@ -39,6 +39,27 @@ Sending the extra samples to the server in parallel saves 3% of the time with 1 
 
 ![EX against seconds per question and against dollars per 1,000 questions](figures/e5_cost.png)
 
+## Databases the router has never seen
+
+Training and Mini-Dev share the same 11 databases. To test transfer, we drew 500 questions from BIRD's training set (at most 8 per database, 68 databases, none shared with the 11) after dropping questions whose gold SQL visibly fails, and routed them with the same frozen routers, without retraining. Every choice and three hypotheses were committed before any model was run on these questions. BIRD's training questions have no difficulty label, so there is no difficulty baseline here.
+
+| Router | EX at 20% escalated | 30% | 50% | Share needed to match always-large |
+| --- | --- | --- | --- | --- |
+| Always-small (7B) | 64.20 | | | |
+| Random | 65.00 | 65.40 | 66.20 | 100% |
+| Crash rule | 68.20 | 67.40 | 67.40 | 20% |
+| Agreement rule (at most 2 of 5 samples agree) | 69.40 | 69.60 | 68.80 | 12% |
+| Router A (1 extra sample) | 70.60 | 70.00 | 69.80 | 9% |
+| Router B (no extra samples) | 69.80 | 69.80 | 69.20 | 9% |
+| Oracle | 74.20 | 74.20 | 74.20 | 4% |
+| Always-large (32B) | | | | 68.20 at 100% |
+
+![EX against share of questions escalated on databases the router has never seen](figures/e6_routing_unseen.png)
+
+- Router A beats random by 5.6, 4.6 and 3.6 points at 20, 30 and 50% escalated (95% CIs +3.8 to +7.5, +2.7 to +6.6 and +1.9 to +5.3), about the same as on Mini-Dev although the 32B's lead over the 7B is half as large (4.0 vs. 8.0 points). Resampling whole databases instead of questions gives nearly the same intervals.
+- Routing beats always-large: the 32B breaks 30 answers the 7B had right, so router A at 20% (70.60) is above always-large (68.20).
+- Router A does not beat the agreement rule here: +0.8 at the rule's own share of 18.4% (p = 0.45).
+
 The same routing curve on the training questions and ROC-AUC against the number of samples are in [`figures/`](figures/), as PDF and PNG.
 
 Full numbers, every frozen decision and the date it was made are in [`docs/Journal.md`](docs/Journal.md). The original plan is in [`docs/proposal.pdf`](docs/proposal.pdf).
@@ -60,6 +81,7 @@ Full numbers, every frozen decision and the date it was made are in [`docs/Journ
 | E3 | Which features matter, and how many samples are worth it? | `train.py --exp e3` | `outputs/e3_results.csv` |
 | E4 | Accuracy against share escalated, with paired tests | `route.py --mode final` | `outputs/e4_*.csv`, routed `e4_*.json` |
 | E5 | Seconds and dollars per router | `timing.py`, `cost.py` | `outputs/e5_*.csv` |
+| E6 | Does routing transfer to databases never seen in training? | `make_unseen.py`, `route.py --mode final`, `unseen_stats.py` | `outputs/e6_*.csv`, routed `e6_*.json` |
 
 ## Repository
 
@@ -72,11 +94,13 @@ scripts/
   check.py          per-question right/wrong, same rule and time limit as the official scorer
   features.py       one feature row per question
   train.py          cross-validated classifiers (E2, E3)
-  route.py          routing curves, rule baselines and paired tests (rehearsal, E4)
+  route.py          routing curves, rule baselines and paired tests (rehearsal, E4, E6)
   timing.py         timing run for E5 (samples sequential vs. parallel)
   cost.py           seconds, tokens and dollars per router (E5)
+  make_unseen.py    sample BIRD train questions on databases never seen in training (E6)
+  unseen_stats.py   database-level bootstrap, ROC-AUC and schema-size subset (E6)
   plots.py          figures (writes figures/)
-figures/            routing curves (test and training), ROC-AUC by samples, cost
+figures/            routing curves (test, training, unseen databases), ROC-AUC by samples, cost
 docs/
   Journal.md        research log: every run, result and frozen decision
   proposal.pdf      project proposal
@@ -105,6 +129,9 @@ data/minidev/mini_dev_sqlite_gold.sql               rebuilt by rebuild_gold.py
 data/dev/dev_databases/<db_id>/<db_id>.sqlite       BIRD dev (dev.zip)
 data/dev/dev.json                                   BIRD dev questions
 data/dev/train.json                                 written by make_train.py
+data/train/train_databases/<db_id>/<db_id>.sqlite   BIRD train (train.zip, 69 databases, 30 GB), only for E6
+data/train/train.json                               BIRD train questions
+data/train/unseen.json                              written by make_unseen.py (the 500 E6 questions)
 ```
 
 ```bash
@@ -172,6 +199,32 @@ Time and cost (E5). The parallel passes need a server started with `OLLAMA_NUM_P
 python scripts/timing.py --questions $M --db_root $MDB --passes together_1,together_3,together_5 --out outputs/timing_minidev.jsonl
 python scripts/timing.py --questions $M --db_root $MDB --passes sequential,large --out outputs/timing_minidev.jsonl
 python scripts/cost.py --timing outputs/timing_minidev.jsonl --price_in 0.66 --price_out 1.00 --out outputs/e5
+```
+
+Unseen databases (E6). `make_unseen.py` runs every gold query (about 12 minutes), drops unusable questions and writes the 500 sampled questions, their gold SQL and a scorer file whose difficulty labels are placeholders, because the official scorer needs every group non-empty. Only its total is used. The model runs take about 1.5 hours.
+
+```bash
+U=data/train/unseen.json; UDB=data/train/train_databases
+python scripts/make_unseen.py data/train
+python scripts/generate.py --questions $U --db_root $UDB --model qwen2.5-coder:7b --logprobs --out outputs/unseen_qwen7b
+cp outputs/unseen_qwen7b.jsonl outputs/unseen_qwen7b_lp.jsonl
+python scripts/generate.py --questions $U --db_root $UDB --model qwen2.5-coder:7b --samples 5 --temperature 0.7 --out outputs/unseen_qwen7b_s5
+python scripts/generate.py --questions $U --db_root $UDB --model qwen2.5-coder:32b --out outputs/unseen_qwen32b
+for run in qwen7b qwen32b qwen7b_s5; do
+  python scripts/check.py --questions $U --db_root $UDB --cache outputs/unseen_$run.jsonl
+done
+python scripts/check.py --questions $U --db_root $UDB --cache outputs/unseen_qwen7b_s5.jsonl \
+  --ref outputs/unseen_qwen7b.jsonl --out outputs/unseen_qwen7b_s5_vs_t0_check.jsonl
+python scripts/features.py --questions $U --db_root $UDB --runs outputs/unseen --out outputs/features_unseen.csv
+python scripts/route.py --mode final --features outputs/features_train.csv --test_features outputs/features_unseen.csv \
+  --runs outputs/unseen --agree_rule 2 --out outputs/e6
+python scripts/unseen_stats.py --test_features outputs/features_unseen.csv --scores outputs/e6_scores.csv \
+  --runs outputs/unseen --out outputs/e6_stats.csv
+```
+
+Official scoring uses `--ground_truth_path data/train/unseen_gold.sql --db_root_path data/train/train_databases/ --diff_json_path data/train/unseen_scorer.jsonl`. Then draw every figure:
+
+```bash
 python scripts/plots.py
 ```
 
@@ -181,6 +234,7 @@ python scripts/plots.py
 - **Two database versions.** 5 of the 11 databases (california_schools, european_football_2, formula_1, thrombosis_prediction, toxicology) have different rows in the Mini-Dev and dev downloads. 23 Mini-Dev and 82 dev gold queries return different results across the two, so each question set is run against its own databases.
 - **Time limit.** At the official 30 s per question, the gold SQL for questions 701 (about 100 s) and 518 (about 20 s) times out, so the gold check scores 99.60. We score at 400 s, where it scores 100.00.
 - **Reworded questions.** 4 Mini-Dev questions are worded differently from their dev versions, so the training set removes Mini-Dev by `question_id`, not by text.
+- **BIRD train gold.** BIRD's training set is less curated than dev. 330 of `retail_world`'s 373 gold queries reference tables and columns that its database doesn't have, 283 gold queries return no rows (dev has none), 53 return only NULL, and 123 use `LIMIT` without `ORDER BY`. `make_unseen.py` drops these, plus gold errors, timeouts and conflicting duplicates (857 questions in all) before sampling.
 
 ## Acknowledgments
 

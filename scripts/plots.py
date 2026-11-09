@@ -179,6 +179,10 @@ def main():
     train = mean_curves(src / "rehearsal_curves.csv")
     routing(train, 54.26, 64.41, "Accuracy against share sent to the 32B (1,034 training questions, mean of 3 seeds)", out, "rehearsal_routing_train")
 
+    unseen_routers = pd.read_csv(src / "e6_routers.csv").set_index("router")
+    unseen = mean_curves(src / "e6_curves.csv")
+    routing(unseen, 64.20, 68.20, "Accuracy against share sent to the 32B (500 questions on 68 unseen databases)", out, "e6_routing_unseen", check=unseen_routers)
+
     tries_auc(src / "e3_results.csv", out)
     cost(src / "e5_curves.csv", src / "e5_points.csv", out)
 
