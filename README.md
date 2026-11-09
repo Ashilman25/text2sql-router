@@ -242,3 +242,5 @@ The prompt builder (`mini_dev/llm/src/prompt.py`) and the evaluation scripts (`e
 
 - J. Li et al. Can LLM Already Serve as a Database Interface? A BIg Bench for Large-Scale Database Grounded Text-to-SQLs. NeurIPS 2023 Datasets and Benchmarks.
 - B. Hui et al. Qwen2.5-Coder Technical Report. arXiv:2409.12186, 2024.
+
+The code in this repository is MIT licensed (see [`LICENSE`](LICENSE)). BIRD and BIRD Mini-Dev data are not included and remain under CC BY-SA 4.0.
