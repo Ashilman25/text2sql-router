@@ -161,6 +161,45 @@ def cost(curves, points, out):
     save(fig, out, "e5_cost")
 
 
+# 1280x640 card for GitHub's social preview: name, hook, headline number, router B's curve
+def social_card(curves, routers, points, out):
+    b = "b gb plus_answer"
+    _, color, _, _ = ROUTERS[b]
+    c = curves[curves["router"] == b]
+    rand = curves[curves["router"] == "random"]
+    small, large = c["ex"].iloc[0], c["ex"].iloc[-1]
+    share = routers.loc[b, "match_large"]
+    cost = pd.read_csv(points).set_index(["router", "point"]).loc[(b, "matches always large"), "usd_vs_large"]
+
+    fig = plt.figure(figsize=(6.4, 3.2), facecolor="white")
+    fig.text(0.05, 0.80, "text2sql-router", fontsize=19, fontweight="bold", color=INK)
+    fig.text(0.05, 0.60, "Small LLM first.\nBig LLM only when it's needed.", fontsize=11, color=INK_2, linespacing=1.4)
+    fig.text(0.05, 0.27, f"{cost:.0f}%", fontsize=34, fontweight="bold", color=color)
+    fig.text(0.26, 0.29, "of the 32B's cost\nfor the same accuracy", fontsize=9.5, color=INK, linespacing=1.4)
+    fig.text(0.05, 0.10, "BIRD text-to-SQL, Qwen2.5-Coder 7B and 32B", fontsize=8, color=INK_2)
+
+    ax = fig.add_axes([0.58, 0.20, 0.38, 0.62])
+    ax.plot(100 * rand["share"], rand["ex"], color=GRAY, linestyle=REFERENCE["random"][2], linewidth=1.2, label="Random")
+    ax.plot(100 * c["share"], c["ex"], color=color, linewidth=2.2, label="Router")
+    ax.axhline(large, color=GRAY, linewidth=0.8)
+    ax.text(2, large + 0.3, "Always 32B", ha="left", va="bottom", fontsize=7.5, color=INK_2)
+    ax.plot(share, large, marker="o", markersize=7, color=color, markeredgecolor="white", markeredgewidth=1.2, zorder=5)
+    ax.annotate(f"matches it at\n{share:.0f}% sent up", (share, large), xytext=(share + 6, small + 1.2), fontsize=7.5, color=INK, arrowprops={"arrowstyle": "-", "color": INK_2, "linewidth": 0.7})
+    ax.set_xlim(0, 100)
+    ax.set_ylim(small - 1, large + 2.5)
+    ax.set_xticks([0, 50, 100])
+    ax.set_xlabel("Questions sent to the 32B (%)", fontsize=7.5)
+    ax.set_ylabel("Accuracy (%)", fontsize=7.5)
+    ax.tick_params(labelsize=7)
+    ax.legend(loc="lower right", fontsize=7, handlelength=1.8)
+
+    # exact 1280x640, so no tight cropping here
+    with plt.rc_context({"savefig.bbox": "standard"}):
+        fig.savefig(out / "social_preview.png", dpi=200, facecolor="white")
+    plt.close(fig)
+    print(f"saved {out / 'social_preview.png'}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--outputs", default="outputs", help="folder with the result CSVs")
@@ -185,6 +224,7 @@ def main():
 
     tries_auc(src / "e3_results.csv", out)
     cost(src / "e5_curves.csv", src / "e5_points.csv", out)
+    social_card(test, routers, src / "e5_points.csv", out)
 
 
 if __name__ == "__main__":
