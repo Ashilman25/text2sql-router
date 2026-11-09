@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this code or its results, please cite it as below."
+type: software
+title: "Run It, Then Route It: Execution-Based Routing Between Small and Large LLMs for Text-to-SQL"
+authors:
+  - family-names: Shilman
+    given-names: Andrew
+    affiliation: San José State University
+  - family-names: Cho
+    given-names: David
+    affiliation: San José State University
+repository-code: "https://github.com/Ashilman25/text2sql-router"
+license: MIT
+abstract: >-
+  A small local LLM answers every text-to-SQL question first. A classifier then
+  predicts whether that answer is wrong from signals available only after its SQL
+  has run (whether it executed, what it returned, token log-probabilities and
+  agreement across samples), and only the flagged questions go to a larger model.
+  Evaluated on BIRD Mini-Dev and on 68 BIRD databases unseen in training.
+keywords:
+  - text-to-SQL
+  - LLM routing
+  - model cascade
+  - BIRD benchmark
+  - uncertainty estimation
