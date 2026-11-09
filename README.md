@@ -2,7 +2,23 @@
 
 Andrew Shilman and David Cho, San José State University, Fall 2026
 
+[![Python 3.11](https://img.shields.io/badge/python-3.11-blue)](requirements.txt) [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
+- **Same accuracy as the 32B for 29% of its cost.** Router B sends 30% of BIRD Mini-Dev questions to the 32B and matches always-32B (57.80 EX), in 62% of its time.
+- **Works on databases it has never seen.** On 500 questions from 68 unseen BIRD databases, the frozen router beats random by 3.6 to 5.6 points and scores above always-32B (70.60 vs. 68.20 EX) while escalating 20%.
+- **Pre-registered.** Every routing choice was committed before each test run, and [`docs/Journal.md`](docs/Journal.md) logs every run, number and decision with its date.
+
 A small local model answers every text-to-SQL question first. A classifier then predicts whether that answer is wrong, using signals that exist only after the SQL has been run: whether it executed, what it returned, the model's token log-probabilities, and how often repeated samples return the same result. Questions the classifier flags are escalated to a larger model. We compare this router against random routing, BIRD's difficulty label, simple execution rules, always-small, always-large and an oracle on BIRD Mini-Dev (SQLite, 500 questions), and then on 500 questions from 68 BIRD databases the router never saw in training.
+
+```mermaid
+flowchart LR
+    Q["Question + schema"] --> S["7B writes SQL"]
+    S --> R["Run the SQL"]
+    R --> F["Signals: did it run, rows returned,<br/>token confidence, agreement of retries"]
+    F --> C{"Classifier:<br/>likely wrong?"}
+    C -- "no" --> K["Keep the 7B's answer"]
+    C -- "yes" --> L["Send to the 32B"]
+```
 
 ## Main results
 
@@ -100,7 +116,7 @@ scripts/
   make_unseen.py    sample BIRD train questions on databases never seen in training (E6)
   unseen_stats.py   database-level bootstrap, ROC-AUC and schema-size subset (E6)
   plots.py          figures (writes figures/)
-figures/            routing curves (test, training, unseen databases), ROC-AUC by samples, cost
+figures/            routing curves (test, training, unseen databases), ROC-AUC by samples, cost, social preview card
 docs/
   Journal.md        research log: every run, result and frozen decision
   proposal.pdf      project proposal
@@ -242,5 +258,7 @@ The prompt builder (`mini_dev/llm/src/prompt.py`) and the evaluation scripts (`e
 
 - J. Li et al. Can LLM Already Serve as a Database Interface? A BIg Bench for Large-Scale Database Grounded Text-to-SQLs. NeurIPS 2023 Datasets and Benchmarks.
 - B. Hui et al. Qwen2.5-Coder Technical Report. arXiv:2409.12186, 2024.
+
+To cite this repository, use GitHub's "Cite this repository" button (from [`CITATION.cff`](CITATION.cff)).
 
 The code in this repository is MIT licensed (see [`LICENSE`](LICENSE)). BIRD and BIRD Mini-Dev data are not included and remain under CC BY-SA 4.0.
