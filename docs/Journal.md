@@ -906,3 +906,102 @@ Chosen from the data check above. No model has been run on any BIRD train questi
   - Against the crash rule: A +1.8 [+0.00, +3.80] p 0.093, +2.4 [+0.20, +4.80] p 0.050, +1.4 [−1.00, +3.80] p 0.31 at 20, 30 and 50%. B +2.8 [+1.00, +4.60] p 0.0043, +2.8 [+0.60, +5.20] p 0.024, +2.2 [−0.20, +4.60] p 0.11.
   - ROC-AUC / PR-AUC for label A: router A 0.845 / 0.872, B 0.829 / 0.839, agreement alone 0.782 / 0.778 (base rate 0.502). For label B: A 0.736 / 0.256, B 0.753 / 0.269, agreement alone 0.708 / 0.262 (base rate 0.140).
   - Database-resampled ranges for A against random (only 11 databases, so rough): [+2.82, +6.63], [+2.84, +7.28], [+2.07, +5.21] at 20, 30 and 50%, close to the per-question ranges.
+
+### Run: E6 model runs (after the freeze was committed and pushed)
+
+- `generate.py` on `data/train/unseen.json` against `data/train/train_databases`, with the frozen settings: the 7B's answer with log-probabilities (6 min 40 s, 0.80 s per question), 5 tries at temperature 0.7 (42 min 46 s, 5.13 s per question) and the 32B's answer (32 min 30 s, 3.90 s per question). `outputs/unseen_qwen7b_lp.jsonl` is a byte-identical copy of `outputs/unseen_qwen7b.jsonl`.
+- **Checks:** 500 questions in every run, in file order. All 3,500 replies ended normally (none hit the 1,024-token cap) and none gave empty SQL. Prompts: 792 tokens on average, 6,725 at most (`works_cycles`), so no warning. Every 7B answer has log-probabilities.
+
+### Result: E6 labels (`check.py`, 400 s, idle machine)
+
+- **EX: 7B 64.20, 32B 68.20, a gap of 4.0 points** (Mini-Dev 8.0, our training questions 10.15). The first of the 5 tries gets 62.80.
+- The 32B fixes 50 of the 7B's wrong answers (label B, 10.0%) and breaks 30 right ones. Both are wrong on 129 (25.8%). Label A: 179 (35.8%). Oracle 74.20.
+- The 7B's SQL crashes on 34 questions (6.8%, Mini-Dev 11.4%), the 32B's on 15 (3.0%). All 5 tries give the same result on 305 questions (61.0%, against 52.4% on training and 44.0% on Mini-Dev), with 1.69 distinct results per question.
+- Every gold query ran (slowest 9.9 s). The tries' marks are identical in the plain and the `--ref` check, and the reference statuses match the 7B's answer on all 500.
+- **Feature table** (`features.py`, `outputs/features_unseen.csv`): same columns as training, no empty cells, `difficulty` empty. Outside the training range: `db_tables` on 102 questions, `db_columns` on 29, `q_words` on 2 and `sql_rows` on 1. 391 questions on 52 databases are inside the training range of both schema sizes.
+
+### Result: E6 routing (`route.py --mode final`, `outputs/e6_*`)
+
+`python scripts/route.py --mode final --features outputs/features_train.csv --test_features outputs/features_unseen.csv --runs outputs/unseen --agree_rule 2 --out outputs/e6`, with the routers fit once on the 1,034 training questions. One model per router, so no seed std.
+
+- **Rule routers at their own shares:** crash rule 67.80 at 6.8%. At most 0 / 1 / 2 / 3 / 4 of 5 tries agree: 67.80 at 8.8%, 68.40 at 12.4%, 69.40 at 18.4%, 69.60 at 26.2%, 69.00 at 39.2%. The frozen agreement rule escalates 18.4% (training 25.1%, Mini-Dev 34.6%) and gains +4.46 over random. Majority answer kept: 66.40 (fixes 27, breaks 16). Oracle 74.20 at 10.0%.
+
+| Router (unseen databases) | EX at 20% | EX at 30% | EX at 50% | Mean EX, 10-50% | Share matching always-large |
+| --- | --- | --- | --- | --- | --- |
+| Random | 65.00 | 65.40 | 66.20 | 65.40 | 100% |
+| Crash rule | 68.20 | 67.40 | 67.40 | 67.59 | 19.6% |
+| Agreement rule (at most 2 of 5) | 69.40 | 69.60 | 68.80 | 69.09 | 11.8% |
+| **A: `lr`, 1 try (main)** | **70.60** | **70.00** | **69.80** | **69.85** | **9.4%** |
+| B: `gb`, 0 tries | 69.80 | 69.80 | 69.20 | 69.60 | 8.8% |
+| A, majority answer kept | 68.60 | 68.80 | 69.40 | 68.72 | 15.8% |
+| A `lr`, 0 tries (extra) | 69.60 | 70.20 | 69.00 | 69.58 | 9.4% |
+| A `lr`, 3 tries (extra) | 70.60 | 70.80 | 68.80 | 69.98 | 9.8% |
+| A `lr`, 5 tries (extra) | 70.00 | 70.40 | 68.80 | 69.88 | 9.8% |
+| A `lr`, question only (extra) | 65.40 | 65.40 | 65.60 | 65.63 | 96.2% |
+| Oracle | 74.20 | 74.20 | 74.20 | 74.20 | 4.0% |
+
+Always-7B 64.20 and always-32B 68.20.
+
+**Router A against the baselines** (EX difference in points [95% bootstrap range], McNemar p):
+
+| Baseline | 20% | 30% | 50% | Rule's own share (18.4%, 92 escalated) |
+| --- | --- | --- | --- | --- |
+| Random | +5.6 [+3.76, +7.52] | +4.6 [+2.70, +6.56] | +3.6 [+1.90, +5.30] | |
+| Crash rule | +2.4 [+0.60, +4.40], p 0.023 | +2.6 [+0.20, +5.00], p 0.041 | +2.4 [+0.20, +4.60], p 0.058 | |
+| Agreement rule | +1.2 [−0.40, +3.00], p 0.24 | +0.4 [−1.20, +2.00], p 0.81 | +1.0 [−0.80, +2.80], p 0.36 | +0.8 [−0.80, +2.40], p 0.45 |
+
+- **Router B against the baselines:** random +4.8 [+3.04, +6.64], +4.4 [+2.58, +6.28], +3.0 [+1.30, +4.70]. Crash rule +1.6 [−0.20, +3.40] p 0.13, +2.4 [+0.20, +4.80] p 0.065, +1.8 [−0.40, +4.00] p 0.16. Agreement rule +0.4, +0.2 and +0.4 at 20, 30 and 50%, and 0.0 at the rule's share (every range includes 0).
+- **B vs. A:** −0.8 [−2.00, +0.20] p 0.29, −0.2 [−1.60, +1.20] p 1.0, −0.6 [−2.40, +1.00] p 0.65 at 20, 30 and 50%.
+- **Majority answer kept vs. the 7B's answer, same ranking:** −2.0 [−3.80, −0.40] p 0.041, −1.2 [−2.40, +0.00] p 0.11, −0.4 [−1.00, +0.00] p 0.50.
+- **Question-only router:** +0.4, 0.0 and −0.6 against random (ranges include 0), −4.0, −4.2 and −3.2 against the agreement rule (ranges below 0).
+- **What A escalates:** of its first 100 / 150 / 250 questions, 91 / 111 / 139 are ones the 7B got wrong (of 179), and 34 / 37 / 46 are fixable (of 50). B: 82 / 104 / 135 and 30 / 35 / 42. On Mini-Dev, A's first 100 held 97 wrong and 33 fixable.
+
+### Result: E6 secondary analyses (`unseen_stats.py`, `outputs/e6_stats.csv`)
+
+- **Databases resampled** (68 databases, 10,000 times, seed 0), against random at 20, 30 and 50%: A [+3.84, +7.47], [+2.77, +6.43], [+1.88, +5.34]. B [+3.03, +6.64], [+2.71, +6.15], [+1.43, +4.59]. Close to the per-question ranges.
+- **ROC-AUC / PR-AUC,** unseen against Mini-Dev:
+
+  | Scores | Label A, unseen (base 0.358) | Label A, Mini-Dev (base 0.502) | Label B, unseen (base 0.100) | Label B, Mini-Dev (base 0.140) |
+  | --- | --- | --- | --- | --- |
+  | Router A | 0.821 / 0.796 | 0.845 / 0.872 | 0.830 / 0.354 | 0.736 / 0.256 |
+  | Router B | 0.800 / 0.743 | 0.829 / 0.839 | 0.799 / 0.333 | 0.753 / 0.269 |
+  | Agreement alone (5 tries) | 0.731 / 0.636 | 0.782 / 0.778 | 0.832 / 0.332 | 0.708 / 0.262 |
+
+- **Databases inside the training schema range** (391 questions on 52 databases, always-7B 63.94, always-32B 66.75, ranked and escalated within the subset), against random at 20, 30 and 50%: A +5.32 [+3.27, +7.47], +4.53 [+2.41, +6.76], +3.19 [+1.15, +5.23]. B +5.07 [+3.17, +7.11], +4.27 [+2.20, +6.42], +2.94 [+1.02, +4.98].
+
+### Result: official EX and Soft F1 of the E6 files (400 s, placeholder labels, total only)
+
+**All 10 official EX totals equal the per-question numbers from `check.py` and `route.py`.**
+
+| File (unseen databases) | Escalated | EX | Soft F1 |
+| --- | --- | --- | --- |
+| Always-small (7B) | 0 | 64.20 | 65.93 |
+| A at 20% | 100 | 70.60 | 71.98 |
+| A at 30% | 150 | 70.00 | 71.52 |
+| A at 50% | 250 | 69.80 | 71.01 |
+| B at 20% | 100 | 69.80 | 71.28 |
+| B at 30% | 150 | 69.80 | 71.18 |
+| B at 50% | 250 | 69.20 | 70.38 |
+| A at the rule's share | 92 | 70.20 | 71.57 |
+| Agreement rule (at most 2 of 5) | 92 | 69.40 | 70.51 |
+| Always-large (32B) | 500 | 68.20 | 69.83 |
+
+### Hypotheses on the unseen databases (router A, frozen)
+
+- **H7 (beats random at 20, 30 and 50%): holds.** +5.6, +4.6 and +3.6 points, every per-question range above 0. The database-resampled ranges are above 0 too.
+- **H8 (beats the agreement rule at the rule's own share): does not hold.** +0.8 points (70.20 vs. 69.40, 92 escalated each), range −0.80 to +2.40, McNemar p 0.45. On Mini-Dev it held (+2.6, p 0.019).
+- **H9 (matches always-32B while escalating at most half): holds.** Router A first reaches 68.20 at 9.4% escalated (47 questions) and never drops below it at any larger share. B first reaches it at 8.8% and dips below only at 93.4 to 93.8%.
+
+### Findings
+
+- **The routers carry over to databases they have never seen.** Router A's gain over random is +5.6 / +4.6 / +3.6 points at 20 / 30 / 50%, against +4.6 / +5.0 / +3.6 on Mini-Dev, even though the gap between the models is half as large (4.0 vs. 8.0 points). The gain holds when whole databases are resampled, and on the 391 questions whose databases are no larger than the training ones.
+- **Routing beats both models.** The 32B breaks 30 questions the 7B had right, so sending only the risky questions up does better than sending everything: A at 20% is 70.60 against 68.20 for always-32B, and every A and B point at 20, 30 and 50% is above always-32B. No paired test against always-32B was frozen, so this is descriptive.
+- **The ranking gets a little worse on unseen databases.** Router A's ROC-AUC for label A drops from 0.845 on Mini-Dev (0.879 in training cross-validation) to 0.821. PR-AUC drops more (0.872 to 0.796), partly because fewer questions are wrong (base rate 0.358 vs. 0.502). Router A's ROC-AUC for label B rises (0.736 to 0.830).
+- **The agreement rule's threshold moves again, this time in its favour.** The tries agree more on these questions (all 5 the same on 61.0%), so "at most 2 of 5 agree" escalates 18.4%, near its best point on this curve (69.60 at 26.2% is the highest of the rule points). There router A is only +0.8 ahead. Over the curve, A is +0.4 to +1.2 ahead of the rule at 20, 30 and 50% with every range including 0, as on Mini-Dev, but with 1 try instead of 5.
+- **Router A beats the crash rule** by +2.4 to +2.6 points at all three shares, every range above 0 (McNemar p 0.023, 0.041 and 0.058). On Mini-Dev only the 30% range was above 0.
+- **Extra tries add nothing measurable, again.** Mean EX over 10 to 50% is 69.58, 69.85, 69.98 and 69.88 with 0, 1, 3 and 5 tries, and B with no tries is at 69.60.
+- **Keeping the majority answer hurts once routing is on,** now with a range below 0 at 20% (−2.0, p 0.041), although alone it beats the 7B's answer (66.40 vs. 64.20).
+- **A router that sees only the question is no better than random,** as on Mini-Dev. Running the 7B's SQL is still what makes routing work.
+- **Large schemas didn't break the routers.** `works_cycles` and the other databases bigger than any training database are 109 of the 500 questions, and the subset without them gives about the same gains.
+- **Label noise:** BIRD train's gold is less checked than dev's, and the exclusions only remove gold that visibly fails. Some of the 129 questions both models get wrong may be gold errors. Wrong gold marks both models wrong, so it lowers the room for routing rather than inflating the router's gain.
+- Many comparisons were run. The verdicts above use only the three pre-registered comparisons for router A.
