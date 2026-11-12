@@ -35,6 +35,7 @@ def exclusion(q, g, duplicates):
     if null_only:
         return "gold returns only NULL"
     
+    #CLAUDE ASSISTED REGEX
     if re.search(r"\bLIMIT\b", q["SQL"], re.I) and not re.search(r"\bORDER\s+BY\b", q["SQL"], re.I):
         return "LIMIT without ORDER BY"
     

@@ -9,6 +9,7 @@ ID_COLUMNS = ["idx", "question_id", "db_id", "difficulty"]
 LABELS = ["label_a", "label_b"]
 
 # words in the question that hint at harder SQL (percentages, ranking, counting)
+#CLAUDE ASSISTED REGEX
 KEYWORDS = {
     "kw_percent": r"percent|%",
     "kw_ratio": r"\bratio\b|\btimes\b",

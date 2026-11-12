@@ -24,6 +24,7 @@ def load_questions(path):
 
 
 #Pull one SQL line out of model's reply
+#CLAUDE ASSISTED REGEX
 def clean_sql(text):
     fence = re.search(r"`{3}(?:sql)?\s*(.*?)`{3}", text, flags=re.S | re.I)
     if fence:
